@@ -68,8 +68,8 @@ export const initialManagedChannels: ManagedChannelEntry[] = [
   {
     id: "youtube-1",
     platform: "youtube",
-    alias: "Brand Main",
-    url: "https://www.youtube.com/@brandmain"
+    alias: "myinvestmentmarkets",
+    url: "https://www.youtube.com/@ranaakondo913"
   },
   {
     id: "tiktok-1",
@@ -98,44 +98,7 @@ export const initialManagedChannels: ManagedChannelEntry[] = [
 ];
 
 export const initialPostStatusRowsByPlatform: Record<PlatformKey, PostStatusRow[]> = {
-  youtube: [
-    {
-      id: "yt-post-1",
-      date: "2026-04-07",
-      url: "https://www.youtube.com/watch?v=launch001",
-      title: "April Product Launch Walkthrough",
-      currentViews: 42815,
-      dailyViewDelta: 6175,
-      currentLikes: 2910,
-      dailyLikeDelta: 422,
-      currentComments: 214,
-      dailyCommentDelta: 32
-    },
-    {
-      id: "yt-post-2",
-      date: "2026-04-07",
-      url: "https://www.youtube.com/shorts/quicktip002",
-      title: "3 Tips in 30 Seconds",
-      currentViews: 96320,
-      dailyViewDelta: 25100,
-      currentLikes: 6842,
-      dailyLikeDelta: 1432,
-      currentComments: 96,
-      dailyCommentDelta: 23
-    },
-    {
-      id: "yt-post-3",
-      date: "2026-04-06",
-      url: "https://www.youtube.com/watch?v=review003",
-      title: "Customer Review Highlights",
-      currentViews: 18360,
-      dailyViewDelta: -420,
-      currentLikes: 1408,
-      dailyLikeDelta: 18,
-      currentComments: 87,
-      dailyCommentDelta: -4
-    }
-  ],
+  youtube: [],
   tiktok: [
     {
       id: "tt-post-1",
@@ -244,38 +207,7 @@ export const initialPostStatusRowsByPlatform: Record<PlatformKey, PostStatusRow[
 
 export const initialWorkHistoryRowsByPlatform: Record<PlatformKey, WorkHistoryRow[]> =
   {
-    youtube: [
-      {
-        id: "yt-log-1",
-        date: "2026-04-07",
-        contentType: "Videos",
-        taskStatus: "Completed",
-        url: "https://www.youtube.com/watch?v=launch001",
-        campaignId: "3102",
-        quantity: "5000",
-        costUsd: "52.50"
-      },
-      {
-        id: "yt-log-2",
-        date: "2026-04-07",
-        contentType: "Shorts",
-        taskStatus: "Processing",
-        url: "https://www.youtube.com/shorts/quicktip002",
-        campaignId: "1198",
-        quantity: "1200",
-        costUsd: "31.00"
-      },
-      {
-        id: "yt-log-3",
-        date: "2026-04-06",
-        contentType: "Videos",
-        taskStatus: "Pending",
-        url: "https://www.youtube.com/watch?v=review003",
-        campaignId: "4421",
-        quantity: "80",
-        costUsd: "14.40"
-      }
-    ],
+    youtube: [],
     tiktok: [
       {
         id: "tt-log-1",

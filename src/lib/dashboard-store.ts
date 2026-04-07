@@ -6,13 +6,16 @@ import {
   initialPostStatusRowsByPlatform,
   initialWorkHistoryRowsByPlatform
 } from "@/lib/dashboard-data";
+import { getKstDateString } from "@/lib/kst-time";
 import { createSupabaseAdminClient, hasSupabaseServerEnv } from "@/lib/supabase";
+import { scrapeYoutubeChannelPostStatus } from "@/lib/youtube-scraper";
 import type {
   CreateManagedChannelInput,
   DashboardInitialData,
   ManagedChannelEntry,
   PostStatusRow,
   SaveWorkHistoryInput,
+  UpdateManagedChannelAliasInput,
   WorkHistoryRow
 } from "@/types/dashboard";
 
@@ -38,6 +41,17 @@ type PostStatusRecord = {
   daily_comment_delta: number;
 };
 
+type PostStatusDailySnapshotRecord = {
+  id: string;
+  channel_id: string;
+  captured_date: string;
+  url: string;
+  title: string;
+  current_views: number;
+  current_likes: number;
+  current_comments: number;
+};
+
 type WorkHistoryRecord = {
   id: string;
   channel_id: string;
@@ -48,6 +62,35 @@ type WorkHistoryRecord = {
   campaign_id: string;
   quantity: string;
   cost_usd: string;
+};
+
+type MetricSnapshot = {
+  currentViews: number;
+  currentLikes: number;
+  currentComments: number;
+};
+
+export type YoutubeChannelSyncResult = {
+  channelId: string;
+  syncDate: string;
+  rows: PostStatusRow[];
+  createdCount: number;
+  updatedCount: number;
+};
+
+export type YoutubeSyncRunResult = {
+  syncDate: string;
+  channelCount: number;
+  postCount: number;
+  createdCount: number;
+  updatedCount: number;
+  channels: Array<{
+    channelId: string;
+    alias: string;
+    postCount: number;
+    createdCount: number;
+    updatedCount: number;
+  }>;
 };
 
 export async function getDashboardState(): Promise<DashboardInitialData> {
@@ -114,6 +157,24 @@ export async function getDashboardState(): Promise<DashboardInitialData> {
       workHistoryByChannelId[row.channel_id].push(mapWorkHistoryRecord(row));
     }
 
+    for (const channel of managedChannels) {
+      const hasPostRows = (postStatusByChannelId[channel.id] ?? []).length > 0;
+
+      if (channel.platform !== "youtube" || hasPostRows) {
+        continue;
+      }
+
+      try {
+        const syncResult = await syncYoutubeChannelPosts(channel.id, channel.url);
+        postStatusByChannelId[channel.id] = syncResult.rows;
+      } catch (error) {
+        console.error(
+          `Failed to sync YouTube post status for channel ${channel.id}:`,
+          error
+        );
+      }
+    }
+
     return {
       dataSource: "supabase",
       managedChannels,
@@ -145,6 +206,36 @@ export async function createManagedChannel(
   }
 
   return mapManagedChannelRecord(data as ManagedChannelRecord);
+}
+
+export async function updateManagedChannelAlias(
+  id: string,
+  input: UpdateManagedChannelAliasInput
+): Promise<ManagedChannelEntry> {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("managed_channels")
+    .update({
+      alias: input.alias
+    })
+    .eq("id", id)
+    .select("id, platform, alias, url, created_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapManagedChannelRecord(data as ManagedChannelRecord);
+}
+
+export async function deleteManagedChannel(id: string) {
+  const supabase = createSupabaseAdminClient();
+  const { error } = await supabase.from("managed_channels").delete().eq("id", id);
+
+  if (error) {
+    throw error;
+  }
 }
 
 export async function createWorkHistory(
@@ -214,6 +305,68 @@ export async function deleteWorkHistory(id: string) {
   }
 }
 
+export async function syncYoutubeChannelPosts(
+  channelId: string,
+  channelUrl: string,
+  options?: {
+    syncDate?: string;
+  }
+): Promise<YoutubeChannelSyncResult> {
+  const rows = await scrapeYoutubeChannelPostStatus(channelUrl);
+  return persistYoutubeChannelPostStatus(
+    channelId,
+    rows,
+    options?.syncDate ?? getKstDateString()
+  );
+}
+
+export async function syncAllYoutubeChannels(
+  syncDate = getKstDateString()
+): Promise<YoutubeSyncRunResult> {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("managed_channels")
+    .select("id, platform, alias, url, created_at")
+    .eq("platform", "youtube")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const channels = (data as ManagedChannelRecord[]).map(mapManagedChannelRecord);
+  const results: YoutubeSyncRunResult["channels"] = [];
+
+  for (const channel of channels) {
+    const syncResult = await syncYoutubeChannelPosts(channel.id, channel.url, {
+      syncDate
+    });
+
+    results.push({
+      channelId: channel.id,
+      alias: channel.alias,
+      postCount: syncResult.rows.length,
+      createdCount: syncResult.createdCount,
+      updatedCount: syncResult.updatedCount
+    });
+  }
+
+  return {
+    syncDate,
+    channelCount: results.length,
+    postCount: results.reduce((total, channel) => total + channel.postCount, 0),
+    createdCount: results.reduce(
+      (total, channel) => total + channel.createdCount,
+      0
+    ),
+    updatedCount: results.reduce(
+      (total, channel) => total + channel.updatedCount,
+      0
+    ),
+    channels: results
+  };
+}
+
 async function ensureDashboardSeedData() {
   const supabase = createSupabaseAdminClient();
   const { count, error } = await supabase
@@ -280,20 +433,24 @@ async function ensureDashboardSeedData() {
       }))
   );
 
-  const { error: insertPostsError } = await supabase
-    .from("post_status_records")
-    .insert(postSeedRows);
+  if (postSeedRows.length > 0) {
+    const { error: insertPostsError } = await supabase
+      .from("post_status_records")
+      .insert(postSeedRows);
 
-  if (insertPostsError) {
-    throw insertPostsError;
+    if (insertPostsError) {
+      throw insertPostsError;
+    }
   }
 
-  const { error: insertWorkHistoryError } = await supabase
-    .from("work_history_records")
-    .insert(workSeedRows);
+  if (workSeedRows.length > 0) {
+    const { error: insertWorkHistoryError } = await supabase
+      .from("work_history_records")
+      .insert(workSeedRows);
 
-  if (insertWorkHistoryError) {
-    throw insertWorkHistoryError;
+    if (insertWorkHistoryError) {
+      throw insertWorkHistoryError;
+    }
   }
 }
 
@@ -302,6 +459,199 @@ function createEmptyChannelMap<T>(channels: ManagedChannelEntry[]) {
     string,
     T[]
   >;
+}
+
+async function persistYoutubeChannelPostStatus(
+  channelId: string,
+  scrapedRows: PostStatusRow[],
+  syncDate: string
+): Promise<YoutubeChannelSyncResult> {
+  const supabase = createSupabaseAdminClient();
+  const [existingRecordsResult, previousSnapshotsResult] = await Promise.all([
+    supabase
+      .from("post_status_records")
+      .select(
+        "id, channel_id, date, url, title, current_views, daily_view_delta, current_likes, daily_like_delta, current_comments, daily_comment_delta"
+      )
+      .eq("channel_id", channelId),
+    supabase
+      .from("post_status_daily_snapshots")
+      .select(
+        "id, channel_id, captured_date, url, title, current_views, current_likes, current_comments"
+      )
+      .eq("channel_id", channelId)
+      .lt("captured_date", syncDate)
+      .order("captured_date", { ascending: false })
+  ]);
+
+  if (existingRecordsResult.error || previousSnapshotsResult.error) {
+    throw (
+      existingRecordsResult.error ??
+      previousSnapshotsResult.error ??
+      new Error("Failed to load YouTube sync state.")
+    );
+  }
+
+  const existingByUrl = new Map<string, PostStatusRecord>();
+
+  for (const record of existingRecordsResult.data as PostStatusRecord[]) {
+    if (!existingByUrl.has(record.url)) {
+      existingByUrl.set(record.url, record);
+    }
+  }
+
+  const previousMetricsByUrl = new Map<string, MetricSnapshot>();
+
+  for (const snapshot of previousSnapshotsResult.data as PostStatusDailySnapshotRecord[]) {
+    if (!previousMetricsByUrl.has(snapshot.url)) {
+      previousMetricsByUrl.set(snapshot.url, mapSnapshotMetrics(snapshot));
+    }
+  }
+
+  const nextRows = scrapedRows
+    .map((row) => {
+      const existingRecord = existingByUrl.get(row.url);
+      const previousMetrics =
+        previousMetricsByUrl.get(row.url) ?? mapRecordMetrics(existingRecord);
+
+      return {
+        id: existingRecord?.id ?? row.id,
+        date: row.date,
+        url: row.url,
+        title: row.title,
+        currentViews: row.currentViews,
+        dailyViewDelta: calculateDelta(row.currentViews, previousMetrics?.currentViews),
+        currentLikes: row.currentLikes,
+        dailyLikeDelta: calculateDelta(row.currentLikes, previousMetrics?.currentLikes),
+        currentComments: row.currentComments,
+        dailyCommentDelta: calculateDelta(
+          row.currentComments,
+          previousMetrics?.currentComments
+        )
+      };
+    })
+    .sort(sortPostStatusRows);
+
+  await replaceDailySnapshots(channelId, syncDate, nextRows);
+  const { createdCount, updatedCount } = await upsertPostStatusRecords(
+    channelId,
+    nextRows,
+    existingByUrl
+  );
+
+  return {
+    channelId,
+    syncDate,
+    rows: nextRows,
+    createdCount,
+    updatedCount
+  };
+}
+
+async function replaceDailySnapshots(
+  channelId: string,
+  syncDate: string,
+  rows: PostStatusRow[]
+) {
+  const supabase = createSupabaseAdminClient();
+  const { error: deleteError } = await supabase
+    .from("post_status_daily_snapshots")
+    .delete()
+    .eq("channel_id", channelId)
+    .eq("captured_date", syncDate);
+
+  if (deleteError) {
+    throw deleteError;
+  }
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("post_status_daily_snapshots")
+    .insert(
+      rows.map((row) => ({
+        channel_id: channelId,
+        captured_date: syncDate,
+        url: row.url,
+        title: row.title,
+        current_views: row.currentViews,
+        current_likes: row.currentLikes,
+        current_comments: row.currentComments
+      }))
+    );
+
+  if (insertError) {
+    throw insertError;
+  }
+}
+
+async function upsertPostStatusRecords(
+  channelId: string,
+  rows: PostStatusRow[],
+  existingByUrl: Map<string, PostStatusRecord>
+) {
+  const supabase = createSupabaseAdminClient();
+  const inserts = rows.filter((row) => !existingByUrl.has(row.url));
+  const updates = rows.filter((row) => existingByUrl.has(row.url));
+
+  const updateResults = await Promise.all(
+    updates.map(async (row) => {
+      const existingRecord = existingByUrl.get(row.url);
+
+      if (!existingRecord) {
+        return;
+      }
+
+      const { error } = await supabase
+        .from("post_status_records")
+        .update({
+          date: row.date,
+          url: row.url,
+          title: row.title,
+          current_views: row.currentViews,
+          daily_view_delta: row.dailyViewDelta,
+          current_likes: row.currentLikes,
+          daily_like_delta: row.dailyLikeDelta,
+          current_comments: row.currentComments,
+          daily_comment_delta: row.dailyCommentDelta
+        })
+        .eq("id", existingRecord.id);
+
+      if (error) {
+        throw error;
+      }
+    })
+  );
+
+  void updateResults;
+
+  if (inserts.length > 0) {
+    const { error } = await supabase.from("post_status_records").insert(
+      inserts.map((row) => ({
+        channel_id: channelId,
+        date: row.date,
+        url: row.url,
+        title: row.title,
+        current_views: row.currentViews,
+        daily_view_delta: row.dailyViewDelta,
+        current_likes: row.currentLikes,
+        daily_like_delta: row.dailyLikeDelta,
+        current_comments: row.currentComments,
+        daily_comment_delta: row.dailyCommentDelta
+      }))
+    );
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  return {
+    createdCount: inserts.length,
+    updatedCount: updates.length
+  };
 }
 
 function mapManagedChannelRecord(record: ManagedChannelRecord): ManagedChannelEntry {
@@ -339,4 +689,36 @@ function mapWorkHistoryRecord(record: WorkHistoryRecord): WorkHistoryRow {
     quantity: record.quantity,
     costUsd: record.cost_usd
   };
+}
+
+function mapSnapshotMetrics(snapshot: PostStatusDailySnapshotRecord): MetricSnapshot {
+  return {
+    currentViews: snapshot.current_views,
+    currentLikes: snapshot.current_likes,
+    currentComments: snapshot.current_comments
+  };
+}
+
+function mapRecordMetrics(record: PostStatusRecord | undefined): MetricSnapshot | null {
+  if (!record) {
+    return null;
+  }
+
+  return {
+    currentViews: record.current_views,
+    currentLikes: record.current_likes,
+    currentComments: record.current_comments
+  };
+}
+
+function calculateDelta(currentValue: number, previousValue?: number | null) {
+  if (typeof previousValue !== "number") {
+    return 0;
+  }
+
+  return currentValue - previousValue;
+}
+
+function sortPostStatusRows(left: PostStatusRow, right: PostStatusRow) {
+  return right.date.localeCompare(left.date) || left.title.localeCompare(right.title);
 }

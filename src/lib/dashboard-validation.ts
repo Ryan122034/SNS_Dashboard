@@ -3,6 +3,7 @@ import type {
   CreateManagedChannelInput,
   PlatformKey,
   SaveWorkHistoryInput,
+  UpdateManagedChannelAliasInput,
   WorkContentType,
   WorkStatus
 } from "@/types/dashboard";
@@ -71,6 +72,25 @@ export function parseManagedChannelInput(
     platform,
     alias,
     url
+  };
+}
+
+export function parseManagedChannelAliasInput(
+  value: unknown
+): UpdateManagedChannelAliasInput | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const input = value as Record<string, unknown>;
+  const alias = typeof input.alias === "string" ? input.alias.trim() : "";
+
+  if (!alias) {
+    return null;
+  }
+
+  return {
+    alias
   };
 }
 

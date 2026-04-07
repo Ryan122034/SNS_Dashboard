@@ -34,6 +34,20 @@ create table if not exists post_status_records (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists post_status_daily_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null references managed_channels(id) on delete cascade,
+  captured_date date not null,
+  url text not null,
+  title text not null,
+  current_views bigint not null default 0,
+  current_likes bigint not null default 0,
+  current_comments bigint not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (channel_id, url, captured_date)
+);
+
 create table if not exists work_history_records (
   id uuid primary key default gen_random_uuid(),
   channel_id uuid not null references managed_channels(id) on delete cascade,
@@ -51,6 +65,8 @@ create table if not exists work_history_records (
 create index if not exists idx_managed_channels_platform on managed_channels(platform);
 create index if not exists idx_post_status_records_channel_id on post_status_records(channel_id);
 create index if not exists idx_post_status_records_date on post_status_records(date desc);
+create index if not exists idx_post_status_daily_snapshots_channel_id on post_status_daily_snapshots(channel_id);
+create index if not exists idx_post_status_daily_snapshots_captured_date on post_status_daily_snapshots(captured_date desc);
 create index if not exists idx_work_history_records_channel_id on work_history_records(channel_id);
 create index if not exists idx_work_history_records_date on work_history_records(date desc);
 
@@ -62,6 +78,11 @@ for each row execute function set_updated_at();
 drop trigger if exists post_status_records_set_updated_at on post_status_records;
 create trigger post_status_records_set_updated_at
 before update on post_status_records
+for each row execute function set_updated_at();
+
+drop trigger if exists post_status_daily_snapshots_set_updated_at on post_status_daily_snapshots;
+create trigger post_status_daily_snapshots_set_updated_at
+before update on post_status_daily_snapshots
 for each row execute function set_updated_at();
 
 drop trigger if exists work_history_records_set_updated_at on work_history_records;

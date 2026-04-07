@@ -64,6 +64,10 @@ export interface CreateManagedChannelInput {
   url: string;
 }
 
+export interface UpdateManagedChannelAliasInput {
+  alias: string;
+}
+
 export interface SaveWorkHistoryInput {
   channelId: string;
   date: string;

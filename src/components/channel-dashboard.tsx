@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   formatNumber,
   formatSignedNumber,
@@ -22,6 +22,7 @@ import type {
   ManagedChannelEntry,
   PlatformKey,
   SaveWorkHistoryInput,
+  UpdateManagedChannelAliasInput,
   WorkContentType,
   WorkHistoryRow,
   WorkStatus
@@ -35,6 +36,18 @@ const tabLabels: Record<DetailTab, string> = {
 interface ChannelDashboardProps {
   initialData: DashboardInitialData;
 }
+
+type YoutubePostFilter = "all" | "Videos" | "Shorts";
+type PageSizeOption = 10 | 20 | "all";
+
+const pageSizeOptions: Array<{
+  value: PageSizeOption;
+  label: string;
+}> = [
+  { value: 10, label: "10개씩 보기" },
+  { value: 20, label: "20개씩 보기" },
+  { value: "all", label: "전체 보기" }
+];
 
 export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
   const [managedChannels, setManagedChannels] = useState<ManagedChannelEntry[]>(
@@ -51,6 +64,10 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
   );
   const [activeTab, setActiveTab] = useState<DetailTab>("postStatus");
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
+  const [isChannelEditModalOpen, setIsChannelEditModalOpen] = useState(false);
+  const [editingChannel, setEditingChannel] = useState<ManagedChannelEntry | null>(
+    null
+  );
   const [isWorkHistoryModalOpen, setIsWorkHistoryModalOpen] = useState(false);
   const [workHistoryModalMode, setWorkHistoryModalMode] = useState<
     "create" | "edit"
@@ -59,11 +76,13 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
     null
   );
   const [channelSubmitPending, setChannelSubmitPending] = useState(false);
+  const [channelEditPending, setChannelEditPending] = useState(false);
   const [workSubmitPending, setWorkSubmitPending] = useState(false);
 
   const [newPlatform, setNewPlatform] = useState<PlatformKey>("youtube");
   const [newAlias, setNewAlias] = useState("");
   const [newChannelUrl, setNewChannelUrl] = useState("");
+  const [editChannelAlias, setEditChannelAlias] = useState("");
 
   const [newWorkDate, setNewWorkDate] = useState("");
   const [newWorkContentType, setNewWorkContentType] =
@@ -73,6 +92,14 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
   const [newCampaignId, setNewCampaignId] = useState("");
   const [newQuantity, setNewQuantity] = useState("");
   const [newCostUsd, setNewCostUsd] = useState("");
+  const [youtubePostFilter, setYoutubePostFilter] =
+    useState<YoutubePostFilter>("all");
+  const [postStatusPage, setPostStatusPage] = useState(1);
+  const [workHistoryPage, setWorkHistoryPage] = useState(1);
+  const [postStatusPageSize, setPostStatusPageSize] =
+    useState<PageSizeOption>(10);
+  const [workHistoryPageSize, setWorkHistoryPageSize] =
+    useState<PageSizeOption>(10);
 
   const persistenceEnabled = initialData.dataSource === "supabase";
   const activeChannel =
@@ -87,6 +114,37 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
   const currentWorkHistoryRows = activeChannel
     ? workHistoryByChannelId[activeChannel.id] ?? []
     : [];
+  const showYoutubePostFilter = activePlatform === "youtube";
+  const filteredPostStatusRows = currentPostStatusRows.filter((row) => {
+    if (!showYoutubePostFilter || youtubePostFilter === "all") {
+      return true;
+    }
+
+    return getPostStatusTypeLabel(row, activePlatform) === youtubePostFilter;
+  });
+  const postStatusTotalPages = getTotalPages(
+    filteredPostStatusRows.length,
+    postStatusPageSize
+  );
+  const currentPostStatusPage = clampPage(postStatusPage, postStatusTotalPages);
+  const paginatedPostStatusRows = paginateRows(
+    filteredPostStatusRows,
+    currentPostStatusPage,
+    postStatusPageSize
+  );
+  const workHistoryTotalPages = getTotalPages(
+    currentWorkHistoryRows.length,
+    workHistoryPageSize
+  );
+  const currentWorkHistoryPage = clampPage(
+    workHistoryPage,
+    workHistoryTotalPages
+  );
+  const paginatedWorkHistoryRows = paginateRows(
+    currentWorkHistoryRows,
+    currentWorkHistoryPage,
+    workHistoryPageSize
+  );
 
   const groupedChannels = useMemo(
     () =>
@@ -99,6 +157,14 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
         .filter((group) => group.channels.length > 0),
     [managedChannels]
   );
+
+  useEffect(() => {
+    setPostStatusPage(1);
+  }, [activeChannelId, youtubePostFilter, postStatusPageSize]);
+
+  useEffect(() => {
+    setWorkHistoryPage(1);
+  }, [activeChannelId, workHistoryPageSize]);
 
   async function handleCreateChannel() {
     const payload = createManagedChannelPayload({
@@ -141,6 +207,96 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
       window.alert(getErrorMessage(error, "관리 채널을 저장하지 못했습니다."));
     } finally {
       setChannelSubmitPending(false);
+    }
+  }
+
+  function openEditChannelModal(channel: ManagedChannelEntry) {
+    setEditingChannel(channel);
+    setEditChannelAlias(channel.alias);
+    setIsChannelEditModalOpen(true);
+  }
+
+  function closeEditChannelModal() {
+    setEditingChannel(null);
+    setEditChannelAlias("");
+    setIsChannelEditModalOpen(false);
+  }
+
+  async function handleSaveChannelAlias() {
+    if (!editingChannel) {
+      return;
+    }
+
+    const payload = createManagedChannelAliasPayload({
+      alias: editChannelAlias
+    });
+
+    if (!payload) {
+      window.alert("별칭을 입력해 주세요.");
+      return;
+    }
+
+    setChannelEditPending(true);
+
+    try {
+      const nextChannel = persistenceEnabled
+        ? await updateManagedChannelAliasRequest(editingChannel.id, payload)
+        : {
+            ...editingChannel,
+            alias: payload.alias
+          };
+
+      setManagedChannels((current) =>
+        current.map((channel) =>
+          channel.id === nextChannel.id ? nextChannel : channel
+        )
+      );
+      closeEditChannelModal();
+    } catch (error) {
+      window.alert(getErrorMessage(error, "채널 별칭을 수정하지 못했습니다."));
+    } finally {
+      setChannelEditPending(false);
+    }
+  }
+
+  async function handleDeleteChannel(channel: ManagedChannelEntry) {
+    const confirmed = window.confirm(
+      `'${channel.alias}' 채널을 삭제하시겠습니까? 저장된 작업 내역도 함께 제거됩니다.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      if (persistenceEnabled) {
+        await deleteManagedChannelRequest(channel.id);
+      }
+
+      const remainingChannels = managedChannels.filter(
+        (item) => item.id !== channel.id
+      );
+
+      setManagedChannels(remainingChannels);
+      setPostStatusByChannelId((current) => {
+        const nextState = { ...current };
+        delete nextState[channel.id];
+        return nextState;
+      });
+      setWorkHistoryByChannelId((current) => {
+        const nextState = { ...current };
+        delete nextState[channel.id];
+        return nextState;
+      });
+      setActiveChannelId(
+        getNextActiveChannelId(remainingChannels, activeChannelId, channel)
+      );
+
+      if (editingChannel?.id === channel.id) {
+        closeEditChannelModal();
+      }
+    } catch (error) {
+      window.alert(getErrorMessage(error, "관리 채널을 삭제하지 못했습니다."));
     }
   }
 
@@ -324,16 +480,44 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
           <section className="panel">
             <div className="channel-link-card">
               <div className="channel-link-card__primary">
-                <span className="label">관리 채널 주소</span>
                 {activeChannel ? (
-                  <a
-                    className="channel-link"
-                    href={activeChannel.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {toChannelLabel(activeChannel.url)}
-                  </a>
+                  <>
+                    <div className="channel-link-card__header">
+                      <div className="channel-link-card__title-row">
+                        <strong className="channel-alias">{activeChannel.alias}</strong>
+
+                        <div className="channel-link-card__actions">
+                          <button
+                            type="button"
+                            className="icon-button icon-button--plain"
+                            aria-label={`${activeChannel.alias} 별칭 수정`}
+                            onClick={() => openEditChannelModal(activeChannel)}
+                          >
+                            <PencilIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button icon-button--plain icon-button--danger"
+                            aria-label={`${activeChannel.alias} 채널 삭제`}
+                            onClick={() => handleDeleteChannel(activeChannel)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="channel-link-card__address-group">
+                      <a
+                        className="channel-link"
+                        href={activeChannel.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {toChannelLabel(activeChannel.url)}
+                      </a>
+                    </div>
+                  </>
                 ) : (
                   <strong className="empty-inline-message">
                     관리 채널을 먼저 추가해 주세요.
@@ -363,129 +547,220 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
                 ))}
               </div>
 
-              {activeTab === "workHistory" ? (
-                <button
-                  type="button"
-                  className="tab-action-button"
-                  onClick={openCreateWorkHistoryModal}
-                  disabled={!activeChannel}
-                >
-                  추가
-                </button>
-              ) : null}
+              <div className="tab-toolbar__actions">
+                {activeTab === "postStatus" && showYoutubePostFilter ? (
+                  <div className="post-filter-row" aria-label="YouTube 게시물 유형 필터">
+                    {(
+                      [
+                        ["all", "전체"],
+                        ["Videos", "Videos"],
+                        ["Shorts", "Shorts"]
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`post-filter-button${youtubePostFilter === value ? " post-filter-button--active" : ""}`}
+                        onClick={() => setYoutubePostFilter(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {activeTab === "workHistory" ? (
+                  <button
+                    type="button"
+                    className="tab-action-button"
+                    onClick={openCreateWorkHistoryModal}
+                    disabled={!activeChannel}
+                  >
+                    추가
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             {activeTab === "postStatus" ? (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>날짜</th>
-                      <th>URL</th>
-                      <th>제목</th>
-                      <th>현재 조회수</th>
-                      <th>전일대비 증가감수</th>
-                      <th>현재 좋아요수</th>
-                      <th>전일대비 증가감수</th>
-                      <th>현재 댓글수</th>
-                      <th>전일대비 증가감수</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {currentPostStatusRows.length > 0 ? (
-                      currentPostStatusRows.map((row) => (
-                        <tr key={row.id}>
-                          <td>{row.date}</td>
-                          <td className="url-cell url-cell--full">
-                            <a href={row.url} target="_blank" rel="noreferrer">
-                              {row.url}
-                            </a>
-                          </td>
-                          <td>{row.title}</td>
-                          <td>{formatNumber(row.currentViews)}</td>
-                          <td className={deltaClassName(row.dailyViewDelta)}>
-                            {formatSignedNumber(row.dailyViewDelta)}
-                          </td>
-                          <td>{formatNumber(row.currentLikes)}</td>
-                          <td className={deltaClassName(row.dailyLikeDelta)}>
-                            {formatSignedNumber(row.dailyLikeDelta)}
-                          </td>
-                          <td>{formatNumber(row.currentComments)}</td>
-                          <td className={deltaClassName(row.dailyCommentDelta)}>
-                            {formatSignedNumber(row.dailyCommentDelta)}
+              <>
+                <div className="section-table-controls">
+                  <span className="section-table-controls__summary">
+                    총 {filteredPostStatusRows.length}개
+                  </span>
+                  <div className="page-size-row">
+                    {pageSizeOptions.map((option) => (
+                      <button
+                        key={option.label}
+                        type="button"
+                        className={`page-size-button${postStatusPageSize === option.value ? " page-size-button--active" : ""}`}
+                        onClick={() => setPostStatusPageSize(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        {showYoutubePostFilter ? <th>유형</th> : null}
+                        <th>날짜</th>
+                        <th>URL</th>
+                        <th>제목</th>
+                        <th>현재 조회수</th>
+                        <th>전일대비 증가감수</th>
+                        <th>현재 좋아요수</th>
+                        <th>전일대비 증가감수</th>
+                        <th>현재 댓글수</th>
+                        <th>전일대비 증가감수</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedPostStatusRows.length > 0 ? (
+                        paginatedPostStatusRows.map((row) => (
+                          <tr key={row.id}>
+                            {showYoutubePostFilter ? (
+                              <td>
+                                <span
+                                  className={`post-type-badge post-type-badge--${getPostStatusTypeClassName(
+                                    row,
+                                    activePlatform
+                                  )}`}
+                                >
+                                  {getPostStatusTypeLabel(row, activePlatform)}
+                                </span>
+                              </td>
+                            ) : null}
+                            <td>{row.date}</td>
+                            <td className="url-cell url-cell--full">
+                              <a href={row.url} target="_blank" rel="noreferrer">
+                                {row.url}
+                              </a>
+                            </td>
+                            <td>{row.title}</td>
+                            <td>{formatNumber(row.currentViews)}</td>
+                            <td className={deltaClassName(row.dailyViewDelta)}>
+                              {formatSignedNumber(row.dailyViewDelta)}
+                            </td>
+                            <td>{formatNumber(row.currentLikes)}</td>
+                            <td className={deltaClassName(row.dailyLikeDelta)}>
+                              {formatSignedNumber(row.dailyLikeDelta)}
+                            </td>
+                            <td>{formatNumber(row.currentComments)}</td>
+                            <td className={deltaClassName(row.dailyCommentDelta)}>
+                              {formatSignedNumber(row.dailyCommentDelta)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={showYoutubePostFilter ? 10 : 9}
+                            className="empty-state-cell"
+                          >
+                            표시할 게시물 상태 데이터가 없습니다.
                           </td>
                         </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={9} className="empty-state-cell">
-                          표시할 게시물 상태 데이터가 없습니다.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <PaginationControls
+                  currentPage={currentPostStatusPage}
+                  totalPages={postStatusTotalPages}
+                  onPageChange={setPostStatusPage}
+                />
+              </>
             ) : (
-              <div className="table-wrap">
-                <table className="data-table data-table--work-history">
-                  <thead>
-                    <tr>
-                      <th>날짜</th>
-                      <th>콘텐츠 유형</th>
-                      <th>작업 상태</th>
-                      <th>URL</th>
-                      <th>Campaign ID</th>
-                      <th>수량</th>
-                      <th>비용($)</th>
-                      <th>액션</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {currentWorkHistoryRows.length > 0 ? (
-                      currentWorkHistoryRows.map((row) => (
-                        <tr key={row.id}>
-                          <td>{row.date}</td>
-                          <td>{row.contentType}</td>
-                          <td>{row.taskStatus}</td>
-                          <td className="url-cell url-cell--full">
-                            <a href={row.url} target="_blank" rel="noreferrer">
-                              {row.url}
-                            </a>
-                          </td>
-                          <td>{row.campaignId}</td>
-                          <td>{row.quantity}</td>
-                          <td>{formatUsdValue(row.costUsd)}</td>
-                          <td className="actions-cell">
-                            <button
-                              type="button"
-                              className="icon-button"
-                              aria-label="작업 내역 편집"
-                              onClick={() => openEditWorkHistoryModal(row)}
-                            >
-                              <PencilIcon />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-button icon-button--danger"
-                              aria-label="작업 내역 삭제"
-                              onClick={() => handleDeleteWorkHistory(row.id)}
-                            >
-                              <TrashIcon />
-                            </button>
+              <>
+                <div className="section-table-controls">
+                  <span className="section-table-controls__summary">
+                    총 {currentWorkHistoryRows.length}개
+                  </span>
+                  <div className="page-size-row">
+                    {pageSizeOptions.map((option) => (
+                      <button
+                        key={option.label}
+                        type="button"
+                        className={`page-size-button${workHistoryPageSize === option.value ? " page-size-button--active" : ""}`}
+                        onClick={() => setWorkHistoryPageSize(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="table-wrap">
+                  <table className="data-table data-table--work-history">
+                    <thead>
+                      <tr>
+                        <th>날짜</th>
+                        <th>콘텐츠 유형</th>
+                        <th>작업 상태</th>
+                        <th>URL</th>
+                        <th>Campaign ID</th>
+                        <th>수량</th>
+                        <th>비용($)</th>
+                        <th>액션</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedWorkHistoryRows.length > 0 ? (
+                        paginatedWorkHistoryRows.map((row) => (
+                          <tr key={row.id}>
+                            <td>{row.date}</td>
+                            <td>{row.contentType}</td>
+                            <td>{row.taskStatus}</td>
+                            <td className="url-cell url-cell--full">
+                              <a href={row.url} target="_blank" rel="noreferrer">
+                                {row.url}
+                              </a>
+                            </td>
+                            <td>{row.campaignId}</td>
+                            <td>{row.quantity}</td>
+                            <td>{formatUsdValue(row.costUsd)}</td>
+                            <td className="actions-cell">
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label="작업 내역 편집"
+                                onClick={() => openEditWorkHistoryModal(row)}
+                              >
+                                <PencilIcon />
+                              </button>
+                              <button
+                                type="button"
+                                className="icon-button icon-button--danger"
+                                aria-label="작업 내역 삭제"
+                                onClick={() => handleDeleteWorkHistory(row.id)}
+                              >
+                                <TrashIcon />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={8} className="empty-state-cell">
+                            등록된 작업 내역이 없습니다.
                           </td>
                         </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={8} className="empty-state-cell">
-                          등록된 작업 내역이 없습니다.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <PaginationControls
+                  currentPage={currentWorkHistoryPage}
+                  totalPages={workHistoryTotalPages}
+                  onPageChange={setWorkHistoryPage}
+                />
+              </>
             )}
           </section>
         </section>
@@ -574,6 +849,86 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
                 disabled={channelSubmitPending}
               >
                 {channelSubmitPending ? "저장 중..." : "추가"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isChannelEditModalOpen && editingChannel ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={closeEditChannelModal}
+        >
+          <div
+            className="modal-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-channel-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-panel__header">
+              <div>
+                <p className="content__eyebrow">채널 수정</p>
+                <h3 id="edit-channel-title">채널 별칭을 수정합니다</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                aria-label="팝업 닫기"
+                onClick={closeEditChannelModal}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-form">
+              <label className="form-field">
+                <span className="form-field__label">플랫폼</span>
+                <input
+                  className="form-field__control"
+                  value={platformPages[editingChannel.platform].name}
+                  readOnly
+                />
+              </label>
+
+              <label className="form-field">
+                <span className="form-field__label">관리 채널 주소</span>
+                <input
+                  className="form-field__control"
+                  value={editingChannel.url}
+                  readOnly
+                />
+              </label>
+
+              <label className="form-field">
+                <span className="form-field__label">별칭</span>
+                <input
+                  className="form-field__control"
+                  value={editChannelAlias}
+                  onChange={(event) => setEditChannelAlias(event.target.value)}
+                  placeholder="예: Brand Main"
+                />
+              </label>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-action-button"
+                onClick={closeEditChannelModal}
+                disabled={channelEditPending}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="modal-action-button modal-action-button--primary"
+                onClick={handleSaveChannelAlias}
+                disabled={channelEditPending}
+              >
+                {channelEditPending ? "저장 중..." : "저장"}
               </button>
             </div>
           </div>
@@ -753,6 +1108,43 @@ async function createManagedChannelRequest(payload: CreateManagedChannelInput) {
   return result.channel;
 }
 
+async function updateManagedChannelAliasRequest(
+  id: string,
+  payload: UpdateManagedChannelAliasInput
+) {
+  const response = await fetch(`/api/channels/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = (await response.json().catch(() => null)) as
+    | { channel?: ManagedChannelEntry; message?: string }
+    | null;
+
+  if (!response.ok || !result?.channel) {
+    throw new Error(result?.message ?? "채널 별칭 수정에 실패했습니다.");
+  }
+
+  return result.channel;
+}
+
+async function deleteManagedChannelRequest(id: string) {
+  const response = await fetch(`/api/channels/${id}`, {
+    method: "DELETE"
+  });
+
+  const result = (await response.json().catch(() => null)) as
+    | { success?: boolean; message?: string }
+    | null;
+
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message ?? "관리 채널 삭제에 실패했습니다.");
+  }
+}
+
 async function createWorkHistoryRequest(payload: SaveWorkHistoryInput) {
   const response = await fetch("/api/work-history", {
     method: "POST",
@@ -812,6 +1204,20 @@ function createManagedChannelPayload({
   };
 }
 
+function createManagedChannelAliasPayload(
+  input: UpdateManagedChannelAliasInput
+): UpdateManagedChannelAliasInput | null {
+  const normalizedAlias = input.alias.trim();
+
+  if (!normalizedAlias) {
+    return null;
+  }
+
+  return {
+    alias: normalizedAlias
+  };
+}
+
 function createWorkHistoryPayload(
   input: SaveWorkHistoryInput
 ): SaveWorkHistoryInput | null {
@@ -855,6 +1261,67 @@ function createLocalWorkHistoryRecord(
     quantity: input.quantity,
     costUsd: input.costUsd
   };
+}
+
+function getNextActiveChannelId(
+  remainingChannels: ManagedChannelEntry[],
+  currentActiveChannelId: string,
+  deletedChannel: ManagedChannelEntry
+) {
+  if (remainingChannels.length === 0) {
+    return "";
+  }
+
+  if (currentActiveChannelId !== deletedChannel.id) {
+    return currentActiveChannelId;
+  }
+
+  return (
+    remainingChannels.find(
+      (channel) => channel.platform === deletedChannel.platform
+    )?.id ?? remainingChannels[0].id
+  );
+}
+
+function getPostStatusTypeLabel(row: { url: string }, platform: PlatformKey) {
+  if (platform === "youtube") {
+    return row.url.includes("/shorts/") ? "Shorts" : "Videos";
+  }
+
+  if (platform === "x" || platform === "instagram" || platform === "facebook") {
+    return "Posts";
+  }
+
+  return "Videos";
+}
+
+function getPostStatusTypeClassName(row: { url: string }, platform: PlatformKey) {
+  return getPostStatusTypeLabel(row, platform).toLowerCase();
+}
+
+function paginateRows<T>(
+  rows: T[],
+  currentPage: number,
+  pageSize: PageSizeOption
+) {
+  if (pageSize === "all") {
+    return rows;
+  }
+
+  const startIndex = (currentPage - 1) * pageSize;
+  return rows.slice(startIndex, startIndex + pageSize);
+}
+
+function getTotalPages(totalCount: number, pageSize: PageSizeOption) {
+  if (pageSize === "all" || totalCount === 0) {
+    return 1;
+  }
+
+  return Math.max(1, Math.ceil(totalCount / pageSize));
+}
+
+function clampPage(page: number, totalPages: number) {
+  return Math.min(Math.max(page, 1), Math.max(totalPages, 1));
 }
 
 function deltaClassName(value: number) {
@@ -938,5 +1405,38 @@ function TrashIcon() {
         strokeWidth="1.7"
       />
     </svg>
+  );
+}
+
+function PaginationControls({
+  currentPage,
+  totalPages,
+  onPageChange
+}: {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) {
+    return null;
+  }
+
+  const pages = Array.from({ length: totalPages }, (_, index) => index + 1);
+
+  return (
+    <div className="pagination-row" aria-label="페이지 이동">
+      <div className="pagination-pages">
+        {pages.map((page) => (
+          <button
+            key={page}
+            type="button"
+            className={`pagination-button${currentPage === page ? " pagination-button--active" : ""}`}
+            onClick={() => onPageChange(page)}
+          >
+            {page}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
