@@ -16,6 +16,7 @@ import {
   normalizeUsd
 } from "@/lib/dashboard-validation";
 import type {
+  ChannelAuthStatus,
   CreateManagedChannelInput,
   DashboardInitialData,
   DetailTab,
@@ -29,8 +30,8 @@ import type {
 } from "@/types/dashboard";
 
 const tabLabels: Record<DetailTab, string> = {
-  postStatus: "게시물 상태",
-  workHistory: "작업 내역"
+  workHistory: "작업 내역",
+  postStatus: "게시물 상태"
 };
 
 interface ChannelDashboardProps {
@@ -58,6 +59,9 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
   );
   const [workHistoryByChannelId, setWorkHistoryByChannelId] = useState(
     initialData.workHistoryByChannelId
+  );
+  const [channelAuthStatusByChannelId, setChannelAuthStatusByChannelId] = useState(
+    initialData.channelAuthStatusByChannelId
   );
   const [activeChannelId, setActiveChannelId] = useState<string>(
     initialData.managedChannels[0]?.id ?? ""
@@ -108,6 +112,10 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
     null;
   const activePlatform = activeChannel?.platform ?? "youtube";
   const currentPage = platformPages[activePlatform];
+  const activeChannelAuthStatus = activeChannel
+    ? channelAuthStatusByChannelId[activeChannel.id] ??
+      createDefaultChannelAuthStatus(activeChannel.platform)
+    : null;
   const currentPostStatusRows = activeChannel
     ? postStatusByChannelId[activeChannel.id] ?? []
     : [];
@@ -166,6 +174,33 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
     setWorkHistoryPage(1);
   }, [activeChannelId, workHistoryPageSize]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const channelId = params.get("channelId");
+    const tiktokStatus = params.get("tiktok");
+
+    if (channelId && managedChannels.some((channel) => channel.id === channelId)) {
+      setActiveChannelId(channelId);
+    }
+
+    if (!tiktokStatus) {
+      return;
+    }
+
+    const message = getTikTokCallbackMessage(tiktokStatus);
+
+    if (message) {
+      window.setTimeout(() => {
+        window.alert(message);
+      }, 0);
+    }
+
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("channelId");
+    cleanUrl.searchParams.delete("tiktok");
+    window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}`);
+  }, [managedChannels]);
+
   async function handleCreateChannel() {
     const payload = createManagedChannelPayload({
       platform: newPlatform,
@@ -196,6 +231,10 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
       setWorkHistoryByChannelId((current) => ({
         ...current,
         [channel.id]: current[channel.id] ?? []
+      }));
+      setChannelAuthStatusByChannelId((current) => ({
+        ...current,
+        [channel.id]: createDefaultChannelAuthStatus(channel.platform)
       }));
       setActiveChannelId(channel.id);
       setActiveTab("postStatus");
@@ -278,6 +317,11 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
       );
 
       setManagedChannels(remainingChannels);
+      setChannelAuthStatusByChannelId((current) => {
+        const nextState = { ...current };
+        delete nextState[channel.id];
+        return nextState;
+      });
       setPostStatusByChannelId((current) => {
         const nextState = { ...current };
         delete nextState[channel.id];
@@ -330,6 +374,12 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
     } catch (error) {
       window.alert(getErrorMessage(error, "작업 내역을 삭제하지 못했습니다."));
     }
+  }
+
+  function handleConnectTikTok(channel: ManagedChannelEntry) {
+    window.location.assign(
+      `/api/tiktok/connect?channelId=${encodeURIComponent(channel.id)}`
+    );
   }
 
   async function saveWorkHistory() {
@@ -516,6 +566,27 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
                       >
                         {toChannelLabel(activeChannel.url)}
                       </a>
+                      {activeChannel.platform === "tiktok" ? (
+                        <div className="channel-connection-row">
+                          <span
+                            className={`connection-pill${activeChannelAuthStatus?.connected ? " connection-pill--connected" : ""}`}
+                          >
+                            {activeChannelAuthStatus?.connected
+                              ? "TikTok Connected"
+                              : "TikTok Not Connected"}
+                          </span>
+                          <button
+                            type="button"
+                            className="connection-button"
+                            onClick={() => handleConnectTikTok(activeChannel)}
+                            disabled={!initialData.tiktokOAuthEnabled}
+                          >
+                            {activeChannelAuthStatus?.connected
+                              ? "Reconnect TikTok"
+                              : "Connect TikTok"}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </>
                 ) : (
@@ -611,11 +682,11 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
                         <th>URL</th>
                         <th>제목</th>
                         <th>현재 조회수</th>
-                        <th>전일대비 증가감수</th>
+                          <th>증가/감</th>
                         <th>현재 좋아요수</th>
-                        <th>전일대비 증가감수</th>
+                          <th>증가/감</th>
                         <th>현재 댓글수</th>
-                        <th>전일대비 증가감수</th>
+                          <th>증가/감</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1263,6 +1334,15 @@ function createLocalWorkHistoryRecord(
   };
 }
 
+function createDefaultChannelAuthStatus(platform: PlatformKey): ChannelAuthStatus {
+  return {
+    connected: false,
+    platform,
+    expiresAt: null,
+    scope: null
+  };
+}
+
 function getNextActiveChannelId(
   remainingChannels: ManagedChannelEntry[],
   currentActiveChannelId: string,
@@ -1346,6 +1426,30 @@ function getErrorMessage(error: unknown, fallbackMessage: string) {
   }
 
   return fallbackMessage;
+}
+
+function getTikTokCallbackMessage(status: string) {
+  if (status === "connected") {
+    return "TikTok channel connected successfully.";
+  }
+
+  if (status === "connected-sync-pending") {
+    return "TikTok channel connected. Initial sync will run next.";
+  }
+
+  if (status === "denied") {
+    return "TikTok connection was canceled.";
+  }
+
+  if (status === "config-error") {
+    return "TikTok OAuth is not configured on the server.";
+  }
+
+  if (status === "invalid-callback" || status === "callback-error") {
+    return "TikTok connection could not be completed.";
+  }
+
+  return null;
 }
 
 function PencilIcon() {

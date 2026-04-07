@@ -6,13 +6,18 @@ import {
   initialPostStatusRowsByPlatform,
   initialWorkHistoryRowsByPlatform
 } from "@/lib/dashboard-data";
+import { getChannelAuthStatusByChannelIds } from "@/lib/channel-auth-store";
 import { getKstDateString } from "@/lib/kst-time";
 import { createSupabaseAdminClient, hasSupabaseServerEnv } from "@/lib/supabase";
+import { hasTikTokSyncEnv, scrapeTikTokChannelPostStatus } from "@/lib/tiktok-api";
+import { hasTikTokOAuthEnv } from "@/lib/tiktok-oauth";
+import { hasXSyncEnv, scrapeXChannelPostStatus } from "@/lib/x-api";
 import { scrapeYoutubeChannelPostStatus } from "@/lib/youtube-scraper";
 import type {
   CreateManagedChannelInput,
   DashboardInitialData,
   ManagedChannelEntry,
+  PlatformKey,
   PostStatusRow,
   SaveWorkHistoryInput,
   UpdateManagedChannelAliasInput,
@@ -70,20 +75,24 @@ type MetricSnapshot = {
   currentComments: number;
 };
 
-export type YoutubeChannelSyncResult = {
+export type PlatformChannelSyncResult = {
   channelId: string;
+  platform: PlatformKey;
   syncDate: string;
   rows: PostStatusRow[];
   createdCount: number;
   updatedCount: number;
 };
 
-export type YoutubeSyncRunResult = {
+export type PlatformSyncRunResult = {
+  platform: PlatformKey;
   syncDate: string;
   channelCount: number;
   postCount: number;
   createdCount: number;
   updatedCount: number;
+  skipped: boolean;
+  reason?: string;
   channels: Array<{
     channelId: string;
     alias: string;
@@ -91,6 +100,11 @@ export type YoutubeSyncRunResult = {
     createdCount: number;
     updatedCount: number;
   }>;
+};
+
+export type DailyPostStatusSyncResult = {
+  syncDate: string;
+  results: PlatformSyncRunResult[];
 };
 
 export async function getDashboardState(): Promise<DashboardInitialData> {
@@ -134,6 +148,9 @@ export async function getDashboardState(): Promise<DashboardInitialData> {
     }
 
     const managedChannels = channelsResult.data.map(mapManagedChannelRecord);
+    const channelAuthStatusByChannelId = await getChannelAuthStatusByChannelIds(
+      managedChannels
+    );
     const postStatusByChannelId = createEmptyChannelMap<PostStatusRow>(
       managedChannels
     );
@@ -160,16 +177,27 @@ export async function getDashboardState(): Promise<DashboardInitialData> {
     for (const channel of managedChannels) {
       const hasPostRows = (postStatusByChannelId[channel.id] ?? []).length > 0;
 
-      if (channel.platform !== "youtube" || hasPostRows) {
+      const isConnected =
+        channelAuthStatusByChannelId[channel.id]?.connected ?? false;
+
+      if (
+        hasPostRows ||
+        !canAutoSyncPlatform(channel.platform) ||
+        (channel.platform === "tiktok" && !isConnected)
+      ) {
         continue;
       }
 
       try {
-        const syncResult = await syncYoutubeChannelPosts(channel.id, channel.url);
+        const syncResult = await syncManagedChannelPosts(
+          channel.id,
+          channel.platform,
+          channel.url
+        );
         postStatusByChannelId[channel.id] = syncResult.rows;
       } catch (error) {
         console.error(
-          `Failed to sync YouTube post status for channel ${channel.id}:`,
+          `Failed to sync ${channel.platform} post status for channel ${channel.id}:`,
           error
         );
       }
@@ -179,7 +207,9 @@ export async function getDashboardState(): Promise<DashboardInitialData> {
       dataSource: "supabase",
       managedChannels,
       postStatusByChannelId,
-      workHistoryByChannelId
+      workHistoryByChannelId,
+      channelAuthStatusByChannelId,
+      tiktokOAuthEnabled: hasTikTokOAuthEnv()
     };
   } catch (error) {
     console.error("Failed to load dashboard data from Supabase:", error);
@@ -311,23 +341,83 @@ export async function syncYoutubeChannelPosts(
   options?: {
     syncDate?: string;
   }
-): Promise<YoutubeChannelSyncResult> {
+): Promise<PlatformChannelSyncResult> {
   const rows = await scrapeYoutubeChannelPostStatus(channelUrl);
-  return persistYoutubeChannelPostStatus(
-    channelId,
-    rows,
-    options?.syncDate ?? getKstDateString()
-  );
+  return persistChannelPostStatus("youtube", channelId, rows, options?.syncDate ?? getKstDateString());
+}
+
+export async function syncTikTokChannelPosts(
+  channelId: string,
+  channelUrl: string,
+  options?: {
+    syncDate?: string;
+  }
+): Promise<PlatformChannelSyncResult> {
+  const rows = await scrapeTikTokChannelPostStatus(channelId, channelUrl);
+  return persistChannelPostStatus("tiktok", channelId, rows, options?.syncDate ?? getKstDateString());
 }
 
 export async function syncAllYoutubeChannels(
   syncDate = getKstDateString()
-): Promise<YoutubeSyncRunResult> {
+): Promise<PlatformSyncRunResult> {
+  return syncAllChannelsForPlatform("youtube", syncDate);
+}
+
+export async function syncAllTikTokChannels(
+  syncDate = getKstDateString()
+): Promise<PlatformSyncRunResult> {
+  return syncAllChannelsForPlatform("tiktok", syncDate);
+}
+
+export async function syncAllXChannels(
+  syncDate = getKstDateString()
+): Promise<PlatformSyncRunResult> {
+  return syncAllChannelsForPlatform("x", syncDate);
+}
+
+export async function syncDailyPostStatusPlatforms(
+  syncDate = getKstDateString()
+): Promise<DailyPostStatusSyncResult> {
+  const [youtubeResult, tiktokResult, xResult] = await Promise.all([
+    syncAllYoutubeChannels(syncDate),
+    syncAllTikTokChannels(syncDate),
+    syncAllXChannels(syncDate)
+  ]);
+
+  return {
+    syncDate,
+    results: [youtubeResult, tiktokResult, xResult]
+  };
+}
+
+async function syncAllChannelsForPlatform(
+  platform: PlatformKey,
+  syncDate: string
+): Promise<PlatformSyncRunResult> {
+  if (!canAutoSyncPlatform(platform)) {
+    return {
+      platform,
+      syncDate,
+      channelCount: 0,
+      postCount: 0,
+      createdCount: 0,
+      updatedCount: 0,
+      skipped: true,
+      reason:
+        platform === "tiktok"
+          ? "TikTok sync requires an access token or refresh-token credentials."
+          : platform === "x"
+            ? "X sync requires X_BEARER_TOKEN."
+          : `Automatic sync is not configured for ${platform}.`,
+      channels: []
+    };
+  }
+
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("managed_channels")
     .select("id, platform, alias, url, created_at")
-    .eq("platform", "youtube")
+    .eq("platform", platform)
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -335,10 +425,33 @@ export async function syncAllYoutubeChannels(
   }
 
   const channels = (data as ManagedChannelRecord[]).map(mapManagedChannelRecord);
-  const results: YoutubeSyncRunResult["channels"] = [];
+  const channelAuthStatusByChannelId = await getChannelAuthStatusByChannelIds(channels);
+  const syncableChannels = channels.filter((channel) => {
+    if (platform !== "tiktok") {
+      return true;
+    }
 
-  for (const channel of channels) {
-    const syncResult = await syncYoutubeChannelPosts(channel.id, channel.url, {
+    return channelAuthStatusByChannelId[channel.id]?.connected ?? false;
+  });
+
+  if (platform === "tiktok" && syncableChannels.length === 0) {
+    return {
+      platform,
+      syncDate,
+      channelCount: 0,
+      postCount: 0,
+      createdCount: 0,
+      updatedCount: 0,
+      skipped: true,
+      reason: "No connected TikTok channels are available for sync.",
+      channels: []
+    };
+  }
+
+  const results: PlatformSyncRunResult["channels"] = [];
+
+  for (const channel of syncableChannels) {
+    const syncResult = await syncManagedChannelPosts(channel.id, channel.platform, channel.url, {
       syncDate
     });
 
@@ -352,6 +465,7 @@ export async function syncAllYoutubeChannels(
   }
 
   return {
+    platform,
     syncDate,
     channelCount: results.length,
     postCount: results.reduce((total, channel) => total + channel.postCount, 0),
@@ -363,8 +477,40 @@ export async function syncAllYoutubeChannels(
       (total, channel) => total + channel.updatedCount,
       0
     ),
+    skipped: false,
     channels: results
   };
+}
+
+async function syncManagedChannelPosts(
+  channelId: string,
+  platform: PlatformKey,
+  channelUrl: string,
+  options?: {
+    syncDate?: string;
+  }
+) {
+  switch (platform) {
+    case "youtube":
+      return syncYoutubeChannelPosts(channelId, channelUrl, options);
+    case "tiktok":
+      return syncTikTokChannelPosts(channelId, channelUrl, options);
+    case "x":
+      return syncXChannelPosts(channelId, channelUrl, options);
+    default:
+      throw new Error(`Automatic sync is not implemented for ${platform}.`);
+  }
+}
+
+export async function syncXChannelPosts(
+  channelId: string,
+  channelUrl: string,
+  options?: {
+    syncDate?: string;
+  }
+): Promise<PlatformChannelSyncResult> {
+  const rows = await scrapeXChannelPostStatus(channelUrl);
+  return persistChannelPostStatus("x", channelId, rows, options?.syncDate ?? getKstDateString());
 }
 
 async function ensureDashboardSeedData() {
@@ -461,11 +607,12 @@ function createEmptyChannelMap<T>(channels: ManagedChannelEntry[]) {
   >;
 }
 
-async function persistYoutubeChannelPostStatus(
+async function persistChannelPostStatus(
+  platform: PlatformKey,
   channelId: string,
   scrapedRows: PostStatusRow[],
   syncDate: string
-): Promise<YoutubeChannelSyncResult> {
+): Promise<PlatformChannelSyncResult> {
   const supabase = createSupabaseAdminClient();
   const [existingRecordsResult, previousSnapshotsResult] = await Promise.all([
     supabase
@@ -488,7 +635,7 @@ async function persistYoutubeChannelPostStatus(
     throw (
       existingRecordsResult.error ??
       previousSnapshotsResult.error ??
-      new Error("Failed to load YouTube sync state.")
+      new Error(`Failed to load ${platform} sync state.`)
     );
   }
 
@@ -541,6 +688,7 @@ async function persistYoutubeChannelPostStatus(
 
   return {
     channelId,
+    platform,
     syncDate,
     rows: nextRows,
     createdCount,
@@ -596,7 +744,7 @@ async function upsertPostStatusRecords(
   const inserts = rows.filter((row) => !existingByUrl.has(row.url));
   const updates = rows.filter((row) => existingByUrl.has(row.url));
 
-  const updateResults = await Promise.all(
+  await Promise.all(
     updates.map(async (row) => {
       const existingRecord = existingByUrl.get(row.url);
 
@@ -625,8 +773,6 @@ async function upsertPostStatusRecords(
     })
   );
 
-  void updateResults;
-
   if (inserts.length > 0) {
     const { error } = await supabase.from("post_status_records").insert(
       inserts.map((row) => ({
@@ -652,6 +798,22 @@ async function upsertPostStatusRecords(
     createdCount: inserts.length,
     updatedCount: updates.length
   };
+}
+
+function canAutoSyncPlatform(platform: PlatformKey) {
+  if (platform === "youtube") {
+    return true;
+  }
+
+  if (platform === "tiktok") {
+    return hasTikTokSyncEnv();
+  }
+
+  if (platform === "x") {
+    return hasXSyncEnv();
+  }
+
+  return false;
 }
 
 function mapManagedChannelRecord(record: ManagedChannelRecord): ManagedChannelEntry {

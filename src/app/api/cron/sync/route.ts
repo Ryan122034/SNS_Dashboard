@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getKstDateString, isSundayInKst } from "@/lib/kst-time";
-import { syncAllYoutubeChannels } from "@/lib/dashboard-store";
+import { syncDailyPostStatusPlatforms } from "@/lib/dashboard-store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -34,12 +34,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       status: "skipped",
       syncDate,
-      reason: "Sunday 00:00 KST is excluded from the YouTube daily sync."
+      reason: "Sunday 00:00 KST is excluded from the daily post sync."
     });
   }
 
   try {
-    const result = await syncAllYoutubeChannels(syncDate);
+    const result = await syncDailyPostStatusPlatforms(syncDate);
 
     return NextResponse.json({
       status: "ok",
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "YouTube daily sync failed.";
+      error instanceof Error ? error.message : "Daily post sync failed.";
 
     return NextResponse.json(
       {

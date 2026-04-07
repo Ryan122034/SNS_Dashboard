@@ -74,83 +74,33 @@ export const initialManagedChannels: ManagedChannelEntry[] = [
   {
     id: "tiktok-1",
     platform: "tiktok",
-    alias: "Brand Clips",
-    url: "https://www.tiktok.com/@brandclips"
+    alias: "Myinvestmentmarkets",
+    url: "https://www.tiktok.com/@mim_global"
   },
   {
     id: "x-1",
     platform: "x",
-    alias: "Brand Updates",
-    url: "https://x.com/brand_updates"
+    alias: "Myinvestmentmarkets",
+    url: "https://x.com/mim_globalX"
   },
   {
     id: "instagram-1",
     platform: "instagram",
-    alias: "Brand Story",
+    alias: "Myinvestmentmarkets",
     url: "https://www.instagram.com/brand.story"
   },
   {
     id: "facebook-1",
     platform: "facebook",
-    alias: "Brand Page",
+    alias: "Myinvestmentmarkets",
     url: "https://www.facebook.com/brandmain"
   }
 ];
 
 export const initialPostStatusRowsByPlatform: Record<PlatformKey, PostStatusRow[]> = {
   youtube: [],
-  tiktok: [
-    {
-      id: "tt-post-1",
-      date: "2026-04-07",
-      url: "https://www.tiktok.com/@brandclips/video/74511001",
-      title: "Quick Feature Demo",
-      currentViews: 51400,
-      dailyViewDelta: 9350,
-      currentLikes: 4398,
-      dailyLikeDelta: 687,
-      currentComments: 147,
-      dailyCommentDelta: 28
-    },
-    {
-      id: "tt-post-2",
-      date: "2026-04-07",
-      url: "https://www.tiktok.com/@brandclips/video/74511002",
-      title: "One Minute Comparison",
-      currentViews: 27840,
-      dailyViewDelta: 2210,
-      currentLikes: 1894,
-      dailyLikeDelta: 146,
-      currentComments: 64,
-      dailyCommentDelta: 5
-    }
-  ],
-  x: [
-    {
-      id: "x-post-1",
-      date: "2026-04-07",
-      url: "https://x.com/brand_updates/status/190010001",
-      title: "Launch announcement thread",
-      currentViews: 21340,
-      dailyViewDelta: 1840,
-      currentLikes: 1186,
-      dailyLikeDelta: 93,
-      currentComments: 74,
-      dailyCommentDelta: 7
-    },
-    {
-      id: "x-post-2",
-      date: "2026-04-06",
-      url: "https://x.com/brand_updates/status/190010002",
-      title: "Feature teaser post",
-      currentViews: 13880,
-      dailyViewDelta: -150,
-      currentLikes: 860,
-      dailyLikeDelta: -8,
-      currentComments: 31,
-      dailyCommentDelta: 2
-    }
-  ],
+  tiktok: [],
+  x: [],
   instagram: [
     {
       id: "ig-post-1",
@@ -208,40 +158,8 @@ export const initialPostStatusRowsByPlatform: Record<PlatformKey, PostStatusRow[
 export const initialWorkHistoryRowsByPlatform: Record<PlatformKey, WorkHistoryRow[]> =
   {
     youtube: [],
-    tiktok: [
-      {
-        id: "tt-log-1",
-        date: "2026-04-07",
-        contentType: "Videos",
-        taskStatus: "Completed",
-        url: "https://www.tiktok.com/@brandclips/video/74511001",
-        campaignId: "2450",
-        quantity: "10000",
-        costUsd: "47.80"
-      },
-      {
-        id: "tt-log-2",
-        date: "2026-04-06",
-        contentType: "Videos",
-        taskStatus: "Processing",
-        url: "https://www.tiktok.com/@brandclips/video/74511002",
-        campaignId: "1181",
-        quantity: "1500",
-        costUsd: "23.40"
-      }
-    ],
-    x: [
-      {
-        id: "x-log-1",
-        date: "2026-04-07",
-        contentType: "Posts",
-        taskStatus: "Completed",
-        url: "https://x.com/brand_updates/status/190010001",
-        campaignId: "7740",
-        quantity: "4000",
-        costUsd: "28.00"
-      }
-    ],
+    tiktok: [],
+    x: [],
     instagram: [
       {
         id: "ig-log-1",
@@ -284,11 +202,25 @@ export function createFallbackDashboardState(): DashboardInitialData {
     ])
   ) as Record<string, WorkHistoryRow[]>;
 
+  const channelAuthStatusByChannelId = Object.fromEntries(
+    managedChannels.map((channel) => [
+      channel.id,
+      {
+        connected: false,
+        platform: channel.platform,
+        expiresAt: null,
+        scope: null
+      }
+    ])
+  );
+
   return {
     dataSource: "fallback",
     managedChannels,
     postStatusByChannelId,
-    workHistoryByChannelId
+    workHistoryByChannelId,
+    channelAuthStatusByChannelId,
+    tiktokOAuthEnabled: false
   };
 }
 

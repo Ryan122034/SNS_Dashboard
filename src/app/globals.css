@@ -266,6 +266,44 @@ select {
   word-break: break-all;
 }
 
+.channel-connection-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.connection-pill--connected {
+  color: var(--blue);
+}
+
+.connection-button {
+  padding: 8px 12px;
+  border: 1px solid var(--blue);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--blue);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.connection-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .channel-link-card__meta {
   text-align: right;
 }

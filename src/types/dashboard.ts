@@ -20,6 +20,13 @@ export interface ManagedChannelEntry {
   url: string;
 }
 
+export interface ChannelAuthStatus {
+  connected: boolean;
+  platform: PlatformKey;
+  expiresAt: string | null;
+  scope: string | null;
+}
+
 export interface PostStatusRow {
   id: string;
   date: string;
@@ -56,6 +63,8 @@ export interface DashboardInitialData {
   managedChannels: ManagedChannelEntry[];
   postStatusByChannelId: Record<string, PostStatusRow[]>;
   workHistoryByChannelId: Record<string, WorkHistoryRow[]>;
+  channelAuthStatusByChannelId: Record<string, ChannelAuthStatus>;
+  tiktokOAuthEnabled: boolean;
 }
 
 export interface CreateManagedChannelInput {

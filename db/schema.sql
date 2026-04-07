@@ -62,6 +62,22 @@ create table if not exists work_history_records (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists channel_auth_tokens (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null references managed_channels(id) on delete cascade,
+  platform text not null check (platform in ('tiktok')),
+  external_user_id text,
+  access_token text,
+  refresh_token text,
+  scope text,
+  token_type text,
+  expires_at timestamptz,
+  refresh_expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (channel_id)
+);
+
 create index if not exists idx_managed_channels_platform on managed_channels(platform);
 create index if not exists idx_post_status_records_channel_id on post_status_records(channel_id);
 create index if not exists idx_post_status_records_date on post_status_records(date desc);
@@ -69,6 +85,8 @@ create index if not exists idx_post_status_daily_snapshots_channel_id on post_st
 create index if not exists idx_post_status_daily_snapshots_captured_date on post_status_daily_snapshots(captured_date desc);
 create index if not exists idx_work_history_records_channel_id on work_history_records(channel_id);
 create index if not exists idx_work_history_records_date on work_history_records(date desc);
+create index if not exists idx_channel_auth_tokens_channel_id on channel_auth_tokens(channel_id);
+create index if not exists idx_channel_auth_tokens_platform on channel_auth_tokens(platform);
 
 drop trigger if exists managed_channels_set_updated_at on managed_channels;
 create trigger managed_channels_set_updated_at
@@ -88,6 +106,11 @@ for each row execute function set_updated_at();
 drop trigger if exists work_history_records_set_updated_at on work_history_records;
 create trigger work_history_records_set_updated_at
 before update on work_history_records
+for each row execute function set_updated_at();
+
+drop trigger if exists channel_auth_tokens_set_updated_at on channel_auth_tokens;
+create trigger channel_auth_tokens_set_updated_at
+before update on channel_auth_tokens
 for each row execute function set_updated_at();
 
 create table if not exists platform_accounts (
