@@ -1,48 +1,53 @@
-export type Platform = "YouTube" | "TikTok" | "Instagram" | "Facebook" | "X";
+export type PlatformKey =
+  | "youtube"
+  | "tiktok"
+  | "x"
+  | "instagram"
+  | "facebook";
 
-export type PostKind = "Video" | "Short" | "Post" | "Reel";
+export type DetailTab = "postStatus" | "workHistory";
 
-export interface ChannelSummary {
+export type WorkContentType = "Channel" | "Videos" | "Shorts" | "Posts";
+
+export type WorkStatus = "Completed" | "Processing" | "Pending" | "Failed";
+
+export interface ManagedChannelEntry {
   id: string;
-  name: string;
-  platform: Platform;
-  handle: string;
-  contentCount: number;
-  followers: number;
-  growthRate: number;
-  lastSyncAt: string;
-}
-
-export interface MetricCard {
-  id: string;
-  label: string;
-  value: string;
-  delta: string;
-  tone: "positive" | "neutral" | "caution";
-}
-
-export interface PostSnapshot {
-  views: number;
-  likes: number;
-  comments: number;
-}
-
-export interface PostPerformance {
-  id: string;
-  channelId: string;
-  platform: Platform;
-  title: string;
-  kind: PostKind;
-  publishedAt: string;
+  platform: PlatformKey;
+  alias: string;
   url: string;
-  current: PostSnapshot;
-  previous: PostSnapshot;
 }
 
-export interface SyncJob {
+export interface PostStatusRow {
   id: string;
-  platform: Platform;
-  status: "Healthy" | "Review" | "Blocked";
-  cadence: string;
-  note: string;
+  date: string;
+  url: string;
+  title: string;
+  currentViews: number;
+  dailyViewDelta: number;
+  currentLikes: number;
+  dailyLikeDelta: number;
+  currentComments: number;
+  dailyCommentDelta: number;
+}
+
+export interface WorkHistoryRow {
+  id: string;
+  date: string;
+  contentType: WorkContentType;
+  taskStatus: WorkStatus;
+  url: string;
+  campaignId: string;
+  quantity: string;
+  costUsd: string;
+}
+
+export interface ManagedChannelPage {
+  key: PlatformKey;
+  name: string;
+  shortName: string;
+  description: string;
+  lastUpdated: string;
+  postStatusRows: PostStatusRow[];
+  workHistoryRows: WorkHistoryRow[];
 }
