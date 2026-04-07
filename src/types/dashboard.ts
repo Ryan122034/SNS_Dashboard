@@ -11,6 +11,8 @@ export type WorkContentType = "Channel" | "Videos" | "Shorts" | "Posts";
 
 export type WorkStatus = "Completed" | "Processing" | "Pending" | "Failed";
 
+export type DashboardDataSource = "fallback" | "supabase";
+
 export interface ManagedChannelEntry {
   id: string;
   platform: PlatformKey;
@@ -42,12 +44,33 @@ export interface WorkHistoryRow {
   costUsd: string;
 }
 
-export interface ManagedChannelPage {
+export interface PlatformPageMeta {
   key: PlatformKey;
   name: string;
-  shortName: string;
   description: string;
   lastUpdated: string;
-  postStatusRows: PostStatusRow[];
-  workHistoryRows: WorkHistoryRow[];
+}
+
+export interface DashboardInitialData {
+  dataSource: DashboardDataSource;
+  managedChannels: ManagedChannelEntry[];
+  postStatusByChannelId: Record<string, PostStatusRow[]>;
+  workHistoryByChannelId: Record<string, WorkHistoryRow[]>;
+}
+
+export interface CreateManagedChannelInput {
+  platform: PlatformKey;
+  alias: string;
+  url: string;
+}
+
+export interface SaveWorkHistoryInput {
+  channelId: string;
+  date: string;
+  contentType: WorkContentType;
+  taskStatus: WorkStatus;
+  url: string;
+  campaignId: string;
+  quantity: string;
+  costUsd: string;
 }

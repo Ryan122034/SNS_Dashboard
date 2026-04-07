@@ -2,20 +2,26 @@
 
 import { useMemo, useState } from "react";
 import {
-  createInitialWorkHistoryByPlatform,
   formatNumber,
   formatSignedNumber,
   formatUsdValue,
-  initialManagedChannels,
-  managedChannelPages,
   platformOrder,
+  platformPages,
   workContentTypeOptions,
   workStatusOptions
 } from "@/lib/dashboard-data";
+import {
+  normalizeCampaignId,
+  normalizeUrl,
+  normalizeUsd
+} from "@/lib/dashboard-validation";
 import type {
+  CreateManagedChannelInput,
+  DashboardInitialData,
   DetailTab,
   ManagedChannelEntry,
   PlatformKey,
+  SaveWorkHistoryInput,
   WorkContentType,
   WorkHistoryRow,
   WorkStatus
@@ -26,14 +32,22 @@ const tabLabels: Record<DetailTab, string> = {
   workHistory: "작업 내역"
 };
 
-export function ChannelDashboard() {
-  const [managedChannels, setManagedChannels] =
-    useState<ManagedChannelEntry[]>(initialManagedChannels);
-  const [workHistoryByPlatform, setWorkHistoryByPlatform] = useState(
-    createInitialWorkHistoryByPlatform
+interface ChannelDashboardProps {
+  initialData: DashboardInitialData;
+}
+
+export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
+  const [managedChannels, setManagedChannels] = useState<ManagedChannelEntry[]>(
+    initialData.managedChannels
+  );
+  const [postStatusByChannelId, setPostStatusByChannelId] = useState(
+    initialData.postStatusByChannelId
+  );
+  const [workHistoryByChannelId, setWorkHistoryByChannelId] = useState(
+    initialData.workHistoryByChannelId
   );
   const [activeChannelId, setActiveChannelId] = useState<string>(
-    initialManagedChannels[0]?.id ?? ""
+    initialData.managedChannels[0]?.id ?? ""
   );
   const [activeTab, setActiveTab] = useState<DetailTab>("postStatus");
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
@@ -44,6 +58,8 @@ export function ChannelDashboard() {
   const [editingWorkRecordId, setEditingWorkRecordId] = useState<string | null>(
     null
   );
+  const [channelSubmitPending, setChannelSubmitPending] = useState(false);
+  const [workSubmitPending, setWorkSubmitPending] = useState(false);
 
   const [newPlatform, setNewPlatform] = useState<PlatformKey>("youtube");
   const [newAlias, setNewAlias] = useState("");
@@ -58,24 +74,194 @@ export function ChannelDashboard() {
   const [newQuantity, setNewQuantity] = useState("");
   const [newCostUsd, setNewCostUsd] = useState("");
 
+  const persistenceEnabled = initialData.dataSource === "supabase";
   const activeChannel =
     managedChannels.find((channel) => channel.id === activeChannelId) ??
-    managedChannels[0];
+    managedChannels[0] ??
+    null;
   const activePlatform = activeChannel?.platform ?? "youtube";
-  const currentPage = managedChannelPages[activePlatform];
-  const currentWorkHistoryRows = workHistoryByPlatform[activePlatform];
+  const currentPage = platformPages[activePlatform];
+  const currentPostStatusRows = activeChannel
+    ? postStatusByChannelId[activeChannel.id] ?? []
+    : [];
+  const currentWorkHistoryRows = activeChannel
+    ? workHistoryByChannelId[activeChannel.id] ?? []
+    : [];
 
   const groupedChannels = useMemo(
     () =>
       platformOrder
         .map((platform) => ({
           platform,
-          page: managedChannelPages[platform],
+          page: platformPages[platform],
           channels: managedChannels.filter((channel) => channel.platform === platform)
         }))
         .filter((group) => group.channels.length > 0),
     [managedChannels]
   );
+
+  async function handleCreateChannel() {
+    const payload = createManagedChannelPayload({
+      platform: newPlatform,
+      alias: newAlias,
+      url: newChannelUrl
+    });
+
+    if (!payload) {
+      window.alert("플랫폼, 별칭, 관리 채널 주소를 모두 입력해 주세요.");
+      return;
+    }
+
+    setChannelSubmitPending(true);
+
+    try {
+      const channel = persistenceEnabled
+        ? await createManagedChannelRequest(payload)
+        : {
+            id: `${payload.platform}-${Date.now()}`,
+            ...payload
+          };
+
+      setManagedChannels((current) => [...current, channel]);
+      setPostStatusByChannelId((current) => ({
+        ...current,
+        [channel.id]: current[channel.id] ?? []
+      }));
+      setWorkHistoryByChannelId((current) => ({
+        ...current,
+        [channel.id]: current[channel.id] ?? []
+      }));
+      setActiveChannelId(channel.id);
+      setActiveTab("postStatus");
+      setNewPlatform("youtube");
+      setNewAlias("");
+      setNewChannelUrl("");
+      setIsChannelModalOpen(false);
+    } catch (error) {
+      window.alert(getErrorMessage(error, "관리 채널을 저장하지 못했습니다."));
+    } finally {
+      setChannelSubmitPending(false);
+    }
+  }
+
+  async function handleDeleteWorkHistory(id: string) {
+    const confirmed = window.confirm("이 작업 내역을 삭제하시겠습니까?");
+
+    if (!confirmed || !activeChannel) {
+      return;
+    }
+
+    try {
+      if (persistenceEnabled) {
+        const response = await fetch(`/api/work-history/${id}`, {
+          method: "DELETE"
+        });
+
+        if (!response.ok) {
+          const result = (await response.json().catch(() => null)) as
+            | { message?: string }
+            | null;
+          throw new Error(result?.message ?? "작업 내역 삭제에 실패했습니다.");
+        }
+      }
+
+      setWorkHistoryByChannelId((current) => ({
+        ...current,
+        [activeChannel.id]: (current[activeChannel.id] ?? []).filter(
+          (row) => row.id !== id
+        )
+      }));
+    } catch (error) {
+      window.alert(getErrorMessage(error, "작업 내역을 삭제하지 못했습니다."));
+    }
+  }
+
+  async function saveWorkHistory() {
+    if (!activeChannel) {
+      return;
+    }
+
+    const payload = createWorkHistoryPayload({
+      channelId: activeChannel.id,
+      date: newWorkDate,
+      contentType: newWorkContentType,
+      taskStatus: newWorkStatus,
+      url: newWorkUrl,
+      campaignId: newCampaignId,
+      quantity: newQuantity,
+      costUsd: newCostUsd
+    });
+
+    if (!payload) {
+      window.alert(
+        "입력값을 확인해 주세요. 날짜는 YYYY-MM-DD, Campaign ID는 4자리 숫자여야 합니다."
+      );
+      return;
+    }
+
+    setWorkSubmitPending(true);
+
+    try {
+      const nextRecord =
+        persistenceEnabled && workHistoryModalMode === "create"
+          ? await createWorkHistoryRequest(payload)
+          : persistenceEnabled && editingWorkRecordId
+            ? await updateWorkHistoryRequest(editingWorkRecordId, payload)
+            : createLocalWorkHistoryRecord(payload, editingWorkRecordId);
+
+      setWorkHistoryByChannelId((current) => ({
+        ...current,
+        [activeChannel.id]:
+          workHistoryModalMode === "edit"
+            ? (current[activeChannel.id] ?? []).map((row) =>
+                row.id === nextRecord.id ? nextRecord : row
+              )
+            : [nextRecord, ...(current[activeChannel.id] ?? [])]
+      }));
+
+      resetWorkHistoryForm();
+      closeWorkHistoryModal();
+    } catch (error) {
+      window.alert(getErrorMessage(error, "작업 내역을 저장하지 못했습니다."));
+    } finally {
+      setWorkSubmitPending(false);
+    }
+  }
+
+  function openCreateWorkHistoryModal() {
+    setWorkHistoryModalMode("create");
+    setEditingWorkRecordId(null);
+    resetWorkHistoryForm();
+    setIsWorkHistoryModalOpen(true);
+  }
+
+  function openEditWorkHistoryModal(row: WorkHistoryRow) {
+    setWorkHistoryModalMode("edit");
+    setEditingWorkRecordId(row.id);
+    setNewWorkDate(row.date);
+    setNewWorkContentType(row.contentType);
+    setNewWorkStatus(row.taskStatus);
+    setNewWorkUrl(row.url);
+    setNewCampaignId(row.campaignId);
+    setNewQuantity(row.quantity);
+    setNewCostUsd(row.costUsd);
+    setIsWorkHistoryModalOpen(true);
+  }
+
+  function closeWorkHistoryModal() {
+    setIsWorkHistoryModalOpen(false);
+    setEditingWorkRecordId(null);
+  }
+
+  function resetWorkHistoryForm() {
+    setNewWorkDate("");
+    setNewWorkContentType("Videos");
+    setNewWorkStatus("Completed");
+    setNewWorkUrl("");
+    setNewCampaignId("");
+    setNewQuantity("");
+    setNewCostUsd("");
+  }
 
   return (
     <>
@@ -139,14 +325,20 @@ export function ChannelDashboard() {
             <div className="channel-link-card">
               <div className="channel-link-card__primary">
                 <span className="label">관리 채널 주소</span>
-                <a
-                  className="channel-link"
-                  href={activeChannel?.url ?? "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {toChannelLabel(activeChannel?.url ?? "")}
-                </a>
+                {activeChannel ? (
+                  <a
+                    className="channel-link"
+                    href={activeChannel.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {toChannelLabel(activeChannel.url)}
+                  </a>
+                ) : (
+                  <strong className="empty-inline-message">
+                    관리 채널을 먼저 추가해 주세요.
+                  </strong>
+                )}
               </div>
 
               <div className="channel-link-card__meta">
@@ -176,6 +368,7 @@ export function ChannelDashboard() {
                   type="button"
                   className="tab-action-button"
                   onClick={openCreateWorkHistoryModal}
+                  disabled={!activeChannel}
                 >
                   추가
                 </button>
@@ -199,29 +392,37 @@ export function ChannelDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {currentPage.postStatusRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.date}</td>
-                        <td className="url-cell">
-                          <a href={row.url} target="_blank" rel="noreferrer">
-                            링크 열기
-                          </a>
-                        </td>
-                        <td>{row.title}</td>
-                        <td>{formatNumber(row.currentViews)}</td>
-                        <td className={deltaClassName(row.dailyViewDelta)}>
-                          {formatSignedNumber(row.dailyViewDelta)}
-                        </td>
-                        <td>{formatNumber(row.currentLikes)}</td>
-                        <td className={deltaClassName(row.dailyLikeDelta)}>
-                          {formatSignedNumber(row.dailyLikeDelta)}
-                        </td>
-                        <td>{formatNumber(row.currentComments)}</td>
-                        <td className={deltaClassName(row.dailyCommentDelta)}>
-                          {formatSignedNumber(row.dailyCommentDelta)}
+                    {currentPostStatusRows.length > 0 ? (
+                      currentPostStatusRows.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.date}</td>
+                          <td className="url-cell url-cell--full">
+                            <a href={row.url} target="_blank" rel="noreferrer">
+                              {row.url}
+                            </a>
+                          </td>
+                          <td>{row.title}</td>
+                          <td>{formatNumber(row.currentViews)}</td>
+                          <td className={deltaClassName(row.dailyViewDelta)}>
+                            {formatSignedNumber(row.dailyViewDelta)}
+                          </td>
+                          <td>{formatNumber(row.currentLikes)}</td>
+                          <td className={deltaClassName(row.dailyLikeDelta)}>
+                            {formatSignedNumber(row.dailyLikeDelta)}
+                          </td>
+                          <td>{formatNumber(row.currentComments)}</td>
+                          <td className={deltaClassName(row.dailyCommentDelta)}>
+                            {formatSignedNumber(row.dailyCommentDelta)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={9} className="empty-state-cell">
+                          표시할 게시물 상태 데이터가 없습니다.
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -241,54 +442,47 @@ export function ChannelDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {currentWorkHistoryRows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.date}</td>
-                        <td>{row.contentType}</td>
-                        <td>{row.taskStatus}</td>
-                        <td className="url-cell url-cell--full">
-                          <a href={row.url} target="_blank" rel="noreferrer">
-                            {row.url}
-                          </a>
-                        </td>
-                        <td>{row.campaignId}</td>
-                        <td>{row.quantity}</td>
-                        <td>{formatUsdValue(row.costUsd)}</td>
-                        <td className="actions-cell">
-                          <button
-                            type="button"
-                            className="icon-button"
-                            aria-label="작업 내역 편집"
-                            onClick={() => openEditWorkHistoryModal(row)}
-                          >
-                            <PencilIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-button icon-button--danger"
-                            aria-label="작업 내역 삭제"
-                            onClick={() => {
-                              const confirmed = window.confirm(
-                                "이 작업 내역을 삭제하시겠습니까?"
-                              );
-
-                              if (!confirmed) {
-                                return;
-                              }
-
-                              setWorkHistoryByPlatform((current) => ({
-                                ...current,
-                                [activePlatform]: current[activePlatform].filter(
-                                  (item) => item.id !== row.id
-                                )
-                              }));
-                            }}
-                          >
-                            <TrashIcon />
-                          </button>
+                    {currentWorkHistoryRows.length > 0 ? (
+                      currentWorkHistoryRows.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.date}</td>
+                          <td>{row.contentType}</td>
+                          <td>{row.taskStatus}</td>
+                          <td className="url-cell url-cell--full">
+                            <a href={row.url} target="_blank" rel="noreferrer">
+                              {row.url}
+                            </a>
+                          </td>
+                          <td>{row.campaignId}</td>
+                          <td>{row.quantity}</td>
+                          <td>{formatUsdValue(row.costUsd)}</td>
+                          <td className="actions-cell">
+                            <button
+                              type="button"
+                              className="icon-button"
+                              aria-label="작업 내역 편집"
+                              onClick={() => openEditWorkHistoryModal(row)}
+                            >
+                              <PencilIcon />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button icon-button--danger"
+                              aria-label="작업 내역 삭제"
+                              onClick={() => handleDeleteWorkHistory(row.id)}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="empty-state-cell">
+                          등록된 작업 내역이 없습니다.
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -313,7 +507,7 @@ export function ChannelDashboard() {
             <div className="modal-panel__header">
               <div>
                 <p className="content__eyebrow">채널 추가</p>
-                <h3 id="add-channel-title">관리 채널을 추가합니다.</h3>
+                <h3 id="add-channel-title">관리 채널을 추가합니다</h3>
               </div>
               <button
                 type="button"
@@ -337,7 +531,7 @@ export function ChannelDashboard() {
                 >
                   {platformOrder.map((platform) => (
                     <option key={platform} value={platform}>
-                      {managedChannelPages[platform].name}
+                      {platformPages[platform].name}
                     </option>
                   ))}
                 </select>
@@ -369,37 +563,17 @@ export function ChannelDashboard() {
                 type="button"
                 className="modal-action-button"
                 onClick={() => setIsChannelModalOpen(false)}
+                disabled={channelSubmitPending}
               >
                 취소
               </button>
               <button
                 type="button"
                 className="modal-action-button modal-action-button--primary"
-                onClick={() => {
-                  const nextUrl = normalizeUrl(newChannelUrl);
-                  const nextAlias = newAlias.trim();
-
-                  if (!nextUrl || !nextAlias) {
-                    return;
-                  }
-
-                  const nextChannel: ManagedChannelEntry = {
-                    id: `${newPlatform}-${Date.now()}`,
-                    platform: newPlatform,
-                    alias: nextAlias,
-                    url: nextUrl
-                  };
-
-                  setManagedChannels((current) => [...current, nextChannel]);
-                  setActiveChannelId(nextChannel.id);
-                  setActiveTab("postStatus");
-                  setNewPlatform("youtube");
-                  setNewAlias("");
-                  setNewChannelUrl("");
-                  setIsChannelModalOpen(false);
-                }}
+                onClick={handleCreateChannel}
+                disabled={channelSubmitPending}
               >
-                추가
+                {channelSubmitPending ? "저장 중..." : "추가"}
               </button>
             </div>
           </div>
@@ -424,8 +598,8 @@ export function ChannelDashboard() {
                 <p className="content__eyebrow">운영 기록</p>
                 <h3 id="work-history-modal-title">
                   {workHistoryModalMode === "create"
-                    ? `${currentPage.name} 작업 내역을 추가합니다.`
-                    : `${currentPage.name} 작업 내역을 편집합니다.`}
+                    ? `${currentPage.name} 작업 내역을 추가합니다`
+                    : `${currentPage.name} 작업 내역을 편집합니다`}
                 </h3>
               </div>
               <button
@@ -535,6 +709,7 @@ export function ChannelDashboard() {
                 type="button"
                 className="modal-action-button"
                 onClick={closeWorkHistoryModal}
+                disabled={workSubmitPending}
               >
                 취소
               </button>
@@ -542,8 +717,13 @@ export function ChannelDashboard() {
                 type="button"
                 className="modal-action-button modal-action-button--primary"
                 onClick={saveWorkHistory}
+                disabled={workSubmitPending || !activeChannel}
               >
-                {workHistoryModalMode === "create" ? "추가" : "저장"}
+                {workSubmitPending
+                  ? "저장 중..."
+                  : workHistoryModalMode === "create"
+                    ? "추가"
+                    : "저장"}
               </button>
             </div>
           </div>
@@ -551,105 +731,98 @@ export function ChannelDashboard() {
       ) : null}
     </>
   );
-
-  function openCreateWorkHistoryModal() {
-    setWorkHistoryModalMode("create");
-    setEditingWorkRecordId(null);
-    setNewWorkDate("");
-    setNewWorkContentType("Videos");
-    setNewWorkStatus("Completed");
-    setNewWorkUrl("");
-    setNewCampaignId("");
-    setNewQuantity("");
-    setNewCostUsd("");
-    setIsWorkHistoryModalOpen(true);
-  }
-
-  function openEditWorkHistoryModal(row: WorkHistoryRow) {
-    setWorkHistoryModalMode("edit");
-    setEditingWorkRecordId(row.id);
-    setNewWorkDate(row.date);
-    setNewWorkContentType(row.contentType);
-    setNewWorkStatus(row.taskStatus);
-    setNewWorkUrl(row.url);
-    setNewCampaignId(row.campaignId);
-    setNewQuantity(row.quantity);
-    setNewCostUsd(row.costUsd);
-    setIsWorkHistoryModalOpen(true);
-  }
-
-  function closeWorkHistoryModal() {
-    setIsWorkHistoryModalOpen(false);
-    setEditingWorkRecordId(null);
-  }
-
-  function saveWorkHistory() {
-    const nextRecord = createWorkHistoryRecord({
-      activePlatform,
-      existingId: editingWorkRecordId,
-      date: newWorkDate,
-      contentType: newWorkContentType,
-      taskStatus: newWorkStatus,
-      url: newWorkUrl,
-      campaignId: newCampaignId,
-      quantity: newQuantity,
-      costUsd: newCostUsd
-    });
-
-    if (!nextRecord) {
-      return;
-    }
-
-    setWorkHistoryByPlatform((current) => ({
-      ...current,
-      [activePlatform]:
-        workHistoryModalMode === "edit"
-          ? current[activePlatform].map((item) =>
-              item.id === nextRecord.id ? nextRecord : item
-            )
-          : [nextRecord, ...current[activePlatform]]
-    }));
-
-    setNewWorkDate("");
-    setNewWorkContentType("Videos");
-    setNewWorkStatus("Completed");
-    setNewWorkUrl("");
-    setNewCampaignId("");
-    setNewQuantity("");
-    setNewCostUsd("");
-    closeWorkHistoryModal();
-  }
 }
 
-function createWorkHistoryRecord({
-  activePlatform,
-  existingId,
-  date,
-  contentType,
-  taskStatus,
-  url,
-  campaignId,
-  quantity,
-  costUsd
-}: {
-  activePlatform: PlatformKey;
-  existingId: string | null;
-  date: string;
-  contentType: WorkContentType;
-  taskStatus: WorkStatus;
-  url: string;
-  campaignId: string;
-  quantity: string;
-  costUsd: string;
-}): WorkHistoryRow | null {
-  const normalizedDate = date.trim();
+async function createManagedChannelRequest(payload: CreateManagedChannelInput) {
+  const response = await fetch("/api/channels", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = (await response.json().catch(() => null)) as
+    | { channel?: ManagedChannelEntry; message?: string }
+    | null;
+
+  if (!response.ok || !result?.channel) {
+    throw new Error(result?.message ?? "관리 채널 생성에 실패했습니다.");
+  }
+
+  return result.channel;
+}
+
+async function createWorkHistoryRequest(payload: SaveWorkHistoryInput) {
+  const response = await fetch("/api/work-history", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = (await response.json().catch(() => null)) as
+    | { workHistory?: WorkHistoryRow; message?: string }
+    | null;
+
+  if (!response.ok || !result?.workHistory) {
+    throw new Error(result?.message ?? "작업 내역 저장에 실패했습니다.");
+  }
+
+  return result.workHistory;
+}
+
+async function updateWorkHistoryRequest(id: string, payload: SaveWorkHistoryInput) {
+  const response = await fetch(`/api/work-history/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = (await response.json().catch(() => null)) as
+    | { workHistory?: WorkHistoryRow; message?: string }
+    | null;
+
+  if (!response.ok || !result?.workHistory) {
+    throw new Error(result?.message ?? "작업 내역 수정에 실패했습니다.");
+  }
+
+  return result.workHistory;
+}
+
+function createManagedChannelPayload({
+  platform,
+  alias,
+  url
+}: CreateManagedChannelInput): CreateManagedChannelInput | null {
+  const normalizedAlias = alias.trim();
   const normalizedUrl = normalizeUrl(url);
-  const normalizedCampaignId = normalizeCampaignId(campaignId);
-  const normalizedQuantity = quantity.trim();
-  const normalizedCostUsd = normalizeUsd(costUsd);
+
+  if (!normalizedAlias || !normalizedUrl) {
+    return null;
+  }
+
+  return {
+    platform,
+    alias: normalizedAlias,
+    url: normalizedUrl
+  };
+}
+
+function createWorkHistoryPayload(
+  input: SaveWorkHistoryInput
+): SaveWorkHistoryInput | null {
+  const normalizedDate = input.date.trim();
+  const normalizedUrl = normalizeUrl(input.url);
+  const normalizedCampaignId = normalizeCampaignId(input.campaignId);
+  const normalizedQuantity = input.quantity.trim();
+  const normalizedCostUsd = normalizeUsd(input.costUsd);
 
   if (
-    !normalizedDate ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate) ||
     !normalizedUrl ||
     !normalizedCampaignId ||
     !normalizedQuantity ||
@@ -659,14 +832,28 @@ function createWorkHistoryRecord({
   }
 
   return {
-    id: existingId ?? `${activePlatform}-log-${Date.now()}`,
+    ...input,
     date: normalizedDate,
-    contentType,
-    taskStatus,
     url: normalizedUrl,
     campaignId: normalizedCampaignId,
     quantity: normalizedQuantity,
     costUsd: normalizedCostUsd
+  };
+}
+
+function createLocalWorkHistoryRecord(
+  input: SaveWorkHistoryInput,
+  existingId: string | null
+): WorkHistoryRow {
+  return {
+    id: existingId ?? `${input.channelId}-log-${Date.now()}`,
+    date: input.date,
+    contentType: input.contentType,
+    taskStatus: input.taskStatus,
+    url: input.url,
+    campaignId: input.campaignId,
+    quantity: input.quantity,
+    costUsd: input.costUsd
   };
 }
 
@@ -686,32 +873,12 @@ function toChannelLabel(url: string) {
   return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
-function normalizeUrl(value: string) {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return "";
+function getErrorMessage(error: unknown, fallbackMessage: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
   }
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    return trimmed;
-  }
-
-  return `https://${trimmed}`;
-}
-
-function normalizeCampaignId(value: string) {
-  const digitsOnly = value.trim().replace(/\D/g, "");
-
-  if (digitsOnly.length !== 4) {
-    return "";
-  }
-
-  return digitsOnly;
-}
-
-function normalizeUsd(value: string) {
-  return value.trim().replace(/^\$/, "");
+  return fallbackMessage;
 }
 
 function PencilIcon() {

@@ -1,3 +1,74 @@
+create extension if not exists pgcrypto;
+
+create or replace function set_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+create table if not exists managed_channels (
+  id uuid primary key default gen_random_uuid(),
+  platform text not null check (platform in ('youtube', 'tiktok', 'x', 'instagram', 'facebook')),
+  alias text not null,
+  url text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (platform, url)
+);
+
+create table if not exists post_status_records (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null references managed_channels(id) on delete cascade,
+  date date not null,
+  url text not null,
+  title text not null,
+  current_views bigint not null default 0,
+  daily_view_delta bigint not null default 0,
+  current_likes bigint not null default 0,
+  daily_like_delta bigint not null default 0,
+  current_comments bigint not null default 0,
+  daily_comment_delta bigint not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists work_history_records (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null references managed_channels(id) on delete cascade,
+  date date not null,
+  content_type text not null check (content_type in ('Channel', 'Videos', 'Shorts', 'Posts')),
+  task_status text not null check (task_status in ('Completed', 'Processing', 'Pending', 'Failed')),
+  url text not null,
+  campaign_id text not null check (campaign_id ~ '^[0-9]{4}$'),
+  quantity text not null,
+  cost_usd text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_managed_channels_platform on managed_channels(platform);
+create index if not exists idx_post_status_records_channel_id on post_status_records(channel_id);
+create index if not exists idx_post_status_records_date on post_status_records(date desc);
+create index if not exists idx_work_history_records_channel_id on work_history_records(channel_id);
+create index if not exists idx_work_history_records_date on work_history_records(date desc);
+
+drop trigger if exists managed_channels_set_updated_at on managed_channels;
+create trigger managed_channels_set_updated_at
+before update on managed_channels
+for each row execute function set_updated_at();
+
+drop trigger if exists post_status_records_set_updated_at on post_status_records;
+create trigger post_status_records_set_updated_at
+before update on post_status_records
+for each row execute function set_updated_at();
+
+drop trigger if exists work_history_records_set_updated_at on work_history_records;
+create trigger work_history_records_set_updated_at
+before update on work_history_records
+for each row execute function set_updated_at();
+
 create table if not exists platform_accounts (
   id uuid primary key default gen_random_uuid(),
   platform text not null,

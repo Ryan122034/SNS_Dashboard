@@ -283,6 +283,12 @@ select {
   font-weight: 600;
 }
 
+.tab-action-button:disabled,
+.modal-action-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .table-wrap {
   overflow-x: auto;
   padding: 18px 24px 24px;
@@ -360,6 +366,18 @@ select {
 
 .actions-cell {
   white-space: nowrap;
+}
+
+.empty-state-cell {
+  padding: 36px 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty-inline-message {
+  display: inline-block;
+  color: var(--text);
+  font-size: 1rem;
 }
 
 .icon-button {

@@ -26,6 +26,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     status: "queued",
     message:
-      "Cron endpoint scaffold is ready. Connect platform clients and a database snapshot writer next."
+      "Cron endpoint scaffold is ready. Connect platform clients and write snapshot rows into Supabase next."
   });
 }
