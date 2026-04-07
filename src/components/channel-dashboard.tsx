@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  campaignServiceOptions,
   formatNumber,
   formatSignedNumber,
   formatUsdValue,
@@ -16,6 +17,7 @@ import {
   normalizeUsd
 } from "@/lib/dashboard-validation";
 import type {
+  CampaignService,
   ChannelAuthStatus,
   CreateManagedChannelInput,
   DashboardInitialData,
@@ -93,6 +95,8 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
     useState<WorkContentType>("Videos");
   const [newWorkStatus, setNewWorkStatus] = useState<WorkStatus>("Completed");
   const [newWorkUrl, setNewWorkUrl] = useState("");
+  const [newCampaignService, setNewCampaignService] =
+    useState<CampaignService>("Views");
   const [newCampaignId, setNewCampaignId] = useState("");
   const [newQuantity, setNewQuantity] = useState("");
   const [newCostUsd, setNewCostUsd] = useState("");
@@ -393,6 +397,7 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
       contentType: newWorkContentType,
       taskStatus: newWorkStatus,
       url: newWorkUrl,
+      campaignService: newCampaignService,
       campaignId: newCampaignId,
       quantity: newQuantity,
       costUsd: newCostUsd
@@ -448,6 +453,7 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
     setNewWorkContentType(row.contentType);
     setNewWorkStatus(row.taskStatus);
     setNewWorkUrl(row.url);
+    setNewCampaignService(row.campaignService);
     setNewCampaignId(row.campaignId);
     setNewQuantity(row.quantity);
     setNewCostUsd(row.costUsd);
@@ -464,6 +470,7 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
     setNewWorkContentType("Videos");
     setNewWorkStatus("Completed");
     setNewWorkUrl("");
+    setNewCampaignService("Views");
     setNewCampaignId("");
     setNewQuantity("");
     setNewCostUsd("");
@@ -774,6 +781,7 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
                         <th>콘텐츠 유형</th>
                         <th>작업 상태</th>
                         <th>URL</th>
+                        <th>Campaign Service</th>
                         <th>Campaign ID</th>
                         <th>수량</th>
                         <th>비용($)</th>
@@ -792,6 +800,7 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
                                 {row.url}
                               </a>
                             </td>
+                            <td>{row.campaignService}</td>
                             <td>{row.campaignId}</td>
                             <td>{row.quantity}</td>
                             <td>{formatUsdValue(row.costUsd)}</td>
@@ -817,7 +826,7 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={8} className="empty-state-cell">
+                          <td colSpan={9} className="empty-state-cell">
                             등록된 작업 내역이 없습니다.
                           </td>
                         </tr>
@@ -1094,6 +1103,23 @@ export function ChannelDashboard({ initialData }: ChannelDashboardProps) {
               </label>
 
               <label className="form-field">
+                <span className="form-field__label">Campaign Service</span>
+                <select
+                  className="form-field__control"
+                  value={newCampaignService}
+                  onChange={(event) =>
+                    setNewCampaignService(event.target.value as CampaignService)
+                  }
+                >
+                  {campaignServiceOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="form-field">
                 <span className="form-field__label">Campaign ID</span>
                 <input
                   inputMode="numeric"
@@ -1312,6 +1338,7 @@ function createWorkHistoryPayload(
     ...input,
     date: normalizedDate,
     url: normalizedUrl,
+    campaignService: input.campaignService,
     campaignId: normalizedCampaignId,
     quantity: normalizedQuantity,
     costUsd: normalizedCostUsd
@@ -1328,6 +1355,7 @@ function createLocalWorkHistoryRecord(
     contentType: input.contentType,
     taskStatus: input.taskStatus,
     url: input.url,
+    campaignService: input.campaignService,
     campaignId: input.campaignId,
     quantity: input.quantity,
     costUsd: input.costUsd

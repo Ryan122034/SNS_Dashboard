@@ -1,5 +1,11 @@
-import { platformOrder, workContentTypeOptions, workStatusOptions } from "@/lib/dashboard-data";
+import {
+  campaignServiceOptions,
+  platformOrder,
+  workContentTypeOptions,
+  workStatusOptions
+} from "@/lib/dashboard-data";
 import type {
+  CampaignService,
   CreateManagedChannelInput,
   PlatformKey,
   SaveWorkHistoryInput,
@@ -18,6 +24,10 @@ export function isWorkContentType(value: string): value is WorkContentType {
 
 export function isWorkStatus(value: string): value is WorkStatus {
   return workStatusOptions.includes(value as WorkStatus);
+}
+
+export function isCampaignService(value: string): value is CampaignService {
+  return campaignServiceOptions.includes(value as CampaignService);
 }
 
 export function normalizeUrl(value: string) {
@@ -110,6 +120,8 @@ export function parseWorkHistoryInput(
   const taskStatus =
     typeof input.taskStatus === "string" ? input.taskStatus : "";
   const url = typeof input.url === "string" ? normalizeUrl(input.url) : "";
+  const campaignService =
+    typeof input.campaignService === "string" ? input.campaignService : "";
   const campaignId =
     typeof input.campaignId === "string"
       ? normalizeCampaignId(input.campaignId)
@@ -125,6 +137,7 @@ export function parseWorkHistoryInput(
     !isWorkContentType(contentType) ||
     !isWorkStatus(taskStatus) ||
     !url ||
+    !isCampaignService(campaignService) ||
     !campaignId ||
     !quantity ||
     !costUsd
@@ -138,6 +151,7 @@ export function parseWorkHistoryInput(
     contentType,
     taskStatus,
     url,
+    campaignService,
     campaignId,
     quantity,
     costUsd

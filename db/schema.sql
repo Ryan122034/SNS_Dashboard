@@ -55,12 +55,16 @@ create table if not exists work_history_records (
   content_type text not null check (content_type in ('Channel', 'Videos', 'Shorts', 'Posts')),
   task_status text not null check (task_status in ('Completed', 'Processing', 'Pending', 'Failed')),
   url text not null,
+  campaign_service text not null default 'Views' check (campaign_service in ('Views', 'Likes', 'Comments', 'Subs')),
   campaign_id text not null check (campaign_id ~ '^[0-9]{4}$'),
   quantity text not null,
   cost_usd text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table if exists work_history_records
+  add column if not exists campaign_service text not null default 'Views';
 
 create table if not exists channel_auth_tokens (
   id uuid primary key default gen_random_uuid(),

@@ -11,6 +11,8 @@ export type WorkContentType = "Channel" | "Videos" | "Shorts" | "Posts";
 
 export type WorkStatus = "Completed" | "Processing" | "Pending" | "Failed";
 
+export type CampaignService = "Views" | "Likes" | "Comments" | "Subs";
+
 export type DashboardDataSource = "fallback" | "supabase";
 
 export interface ManagedChannelEntry {
@@ -46,6 +48,7 @@ export interface WorkHistoryRow {
   contentType: WorkContentType;
   taskStatus: WorkStatus;
   url: string;
+  campaignService: CampaignService;
   campaignId: string;
   quantity: string;
   costUsd: string;
@@ -83,6 +86,7 @@ export interface SaveWorkHistoryInput {
   contentType: WorkContentType;
   taskStatus: WorkStatus;
   url: string;
+  campaignService: CampaignService;
   campaignId: string;
   quantity: string;
   costUsd: string;

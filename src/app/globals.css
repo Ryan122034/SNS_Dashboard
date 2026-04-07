@@ -269,7 +269,10 @@ select {
 }
 
 .channel-link {
-  display: inline-block;
+  display: inline-flex;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
   font-size: 1rem;
   font-weight: 600;
   word-break: break-all;
@@ -512,15 +515,19 @@ select {
 }
 
 .data-table--work-history th:nth-child(5) {
+  width: 140px;
+}
+
+.data-table--work-history th:nth-child(6) {
   width: 150px;
 }
 
-.data-table--work-history th:nth-child(6),
-.data-table--work-history th:nth-child(7) {
+.data-table--work-history th:nth-child(7),
+.data-table--work-history th:nth-child(8) {
   width: 110px;
 }
 
-.data-table--work-history th:nth-child(8) {
+.data-table--work-history th:nth-child(9) {
   width: 96px;
 }
 

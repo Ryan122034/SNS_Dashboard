@@ -64,6 +64,7 @@ type WorkHistoryRecord = {
   content_type: WorkHistoryRow["contentType"];
   task_status: WorkHistoryRow["taskStatus"];
   url: string;
+  campaign_service: WorkHistoryRow["campaignService"];
   campaign_id: string;
   quantity: string;
   cost_usd: string;
@@ -132,7 +133,7 @@ export async function getDashboardState(): Promise<DashboardInitialData> {
       supabase
         .from("work_history_records")
         .select(
-          "id, channel_id, date, content_type, task_status, url, campaign_id, quantity, cost_usd"
+          "id, channel_id, date, content_type, task_status, url, campaign_service, campaign_id, quantity, cost_usd"
         )
         .order("date", { ascending: false })
         .order("created_at", { ascending: false })
@@ -280,12 +281,13 @@ export async function createWorkHistory(
       content_type: input.contentType,
       task_status: input.taskStatus,
       url: input.url,
+      campaign_service: input.campaignService,
       campaign_id: input.campaignId,
       quantity: input.quantity,
       cost_usd: input.costUsd
     })
     .select(
-      "id, channel_id, date, content_type, task_status, url, campaign_id, quantity, cost_usd"
+      "id, channel_id, date, content_type, task_status, url, campaign_service, campaign_id, quantity, cost_usd"
     )
     .single();
 
@@ -309,13 +311,14 @@ export async function updateWorkHistory(
       content_type: input.contentType,
       task_status: input.taskStatus,
       url: input.url,
+      campaign_service: input.campaignService,
       campaign_id: input.campaignId,
       quantity: input.quantity,
       cost_usd: input.costUsd
     })
     .eq("id", id)
     .select(
-      "id, channel_id, date, content_type, task_status, url, campaign_id, quantity, cost_usd"
+      "id, channel_id, date, content_type, task_status, url, campaign_service, campaign_id, quantity, cost_usd"
     )
     .single();
 
@@ -573,6 +576,7 @@ async function ensureDashboardSeedData() {
         content_type: row.contentType,
         task_status: row.taskStatus,
         url: row.url,
+        campaign_service: row.campaignService,
         campaign_id: row.campaignId,
         quantity: row.quantity,
         cost_usd: row.costUsd
@@ -847,6 +851,7 @@ function mapWorkHistoryRecord(record: WorkHistoryRecord): WorkHistoryRow {
     contentType: record.content_type,
     taskStatus: record.task_status,
     url: record.url,
+    campaignService: record.campaign_service,
     campaignId: record.campaign_id,
     quantity: record.quantity,
     costUsd: record.cost_usd

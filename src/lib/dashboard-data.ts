@@ -1,4 +1,5 @@
 import type {
+  CampaignService,
   DashboardInitialData,
   ManagedChannelEntry,
   PlatformKey,
@@ -29,6 +30,13 @@ export const workStatusOptions: WorkStatus[] = [
   "Processing",
   "Pending",
   "Failed"
+];
+
+export const campaignServiceOptions: CampaignService[] = [
+  "Views",
+  "Likes",
+  "Comments",
+  "Subs"
 ];
 
 export const platformPages: Record<PlatformKey, PlatformPageMeta> = {
@@ -167,6 +175,7 @@ export const initialWorkHistoryRowsByPlatform: Record<PlatformKey, WorkHistoryRo
         contentType: "Posts",
         taskStatus: "Completed",
         url: "https://www.instagram.com/p/IGPOST001/",
+        campaignService: "Views",
         campaignId: "5078",
         quantity: "900",
         costUsd: "19.80"
@@ -179,6 +188,7 @@ export const initialWorkHistoryRowsByPlatform: Record<PlatformKey, WorkHistoryRo
         contentType: "Posts",
         taskStatus: "Completed",
         url: "https://www.facebook.com/brandmain/posts/110001",
+        campaignService: "Views",
         campaignId: "2290",
         quantity: "3000",
         costUsd: "17.50"
