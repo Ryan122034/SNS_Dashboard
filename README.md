@@ -35,7 +35,6 @@ YOUTUBE_CLIENT_SECRET=
 YOUTUBE_REFRESH_TOKEN=
 ```
 
-## Git remotes
+## Git remote
 
-- `origin`: `https://github.com/walter435/SNS_Dashboard.git`
-- `upstream`: `https://github.com/Ryan122034/SNS_Dashboard.git`
+- `origin`: `https://github.com/Ryan122034/SNS_Dashboard.git`
